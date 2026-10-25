@@ -8,7 +8,7 @@ Zero W v1.1 с Raspberry Pi OS 32-bit.
 ## Данные
 
 - Модель: `data/model.stl`.
-- Датчики: `data/sensors.csv`, столбцы `id,x,y,z,temperature`.
+- Датчики: `data/sensors.csv`, столбцы `id,x,y,z`.
 - Координаты CSV должны совпадать с STL по системе координат и единицам.
   Приложение одинаково центрирует и масштабирует модель и датчики.
 - При запуске программа предупреждает о точках датчиков за пределами габаритов STL.
@@ -28,15 +28,11 @@ Zero W v1.1 с Raspberry Pi OS 32-bit.
 
 ## Raspberry Pi OS (32-bit)
 
-Инструкция предназначена для Raspberry Pi Zero W v1.1 и 32-битной Raspberry Pi
-OS (ARMHF, в том числе Release 5.6). Для первого запуска понадобятся microSD,
-карта на 16 ГБ или больше, блок питания, монитор с переходником mini-HDMI,
-USB OTG-переходник, клавиатура и мышь. У Zero W нет Ethernet, а Wi-Fi работает в диапазоне 2,4 ГГц.
+Инструкция предназначена для Raspberry Pi Zero W v1.1 и 32-битной PiOS (ARMHF). У Zero W нет Ethernet, а Wi-Fi работает в диапазоне 2,4 ГГц.
 
 ### Сборка и запуск
 
-Откройте Terminal в рабочем столе Pi, обновите систему и установите Git,
-компилятор, CMake и SDL2:
+Откройте Terminal (ctrl+alt+T) в рабочем столе PiOS, обновите систему при необходимости и установите зависимости: Git, компилятор, CMake и SDL2:
 
 ```bash
 sudo apt update
@@ -44,47 +40,51 @@ sudo apt full-upgrade -y
 sudo apt install -y git build-essential cmake pkg-config libsdl2-dev
 ```
 
-Проверьте версию ОС и архитектуру: `cat` должен показать нужный выпуск ОС,
-а `dpkg` — вывести `armhf`.
+Склонируйте репозиторий в каталог `/home/user/git/TermVisualization-BGA-`. (или любой другой по вашему желанию).
+Необходимо включить SSH-сервер в raspi-config.
+Для SSH-клонирования на Raspberry Pi заранее добавьте публичный SSH-ключ Pi в настройки GitHub (**Settings → SSH and GPG keys → New SSH key**, тип **Authentication Key**):
 
 ```bash
-cat /etc/os-release
-dpkg --print-architecture
-```
-
-Скачайте опубликованную C++/SDL2-версию проекта и перейдите в её каталог. Если
-обновления ещё не отправлены в GitHub, сначала опубликуйте их из компьютера,
-на котором ведётся разработка.
-
-```bash
-git clone https://github.com/qyopw/TermVisualization-BGA-.git
+mkdir -p /home/user/git
+cd /home/user/git
+git clone git@github.com:qyopw/TermVisualization-BGA-.git
 cd TermVisualization-BGA-
 ```
 
-Соберите его непосредственно на Pi Zero W, чтобы получить ARMHF-файл. Сборка
-в один поток подходит для этой маломощной платы:
+### Обновление проекта и пересборка
+
+После отправки изменений с компьютера разработки обновите исходники на Pi и
+пересоберите приложение:
 
 ```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --parallel 1
-./build/bga_visualizer
+cd /home/cpt/git/TermVisualization-BGA-
+git pull
+./rebuild.sh
+```
+
+Скрипт `rebuild.sh` находится в корне репозитория. Он переходит в каталог
+проекта, конфигурирует сборку CMake в режиме `Release` и компилирует приложение
+в один поток. Если сборка завершилась ошибкой, скрипт останавливается.
+
+Если скрипт не запускается с ошибкой `Permission denied`, добавьте право
+исполнения:
+
+```bash
+chmod +x rebuild.sh
 ```
 
 Запускайте программу из Terminal, открытого в графическом рабочем столе, не
 через SSH или текстовую консоль: для SDL2 требуется активный графический сеанс.
 При конфигурации CMake файлы `data/model.stl` и `data/sensors.csv` встраиваются
-в исполняемый файл. Чтобы перенести его на другую Raspberry Pi с такой же
-32-битной ОС, скопируйте только `build/bga_visualizer`; на целевой Pi должны быть
-установлены SDL2 runtime-библиотека и системные библиотеки.
-
-Чтобы заменить встроенные данные, передайте пути к модели и CSV:
-
-```bash
-./build/bga_visualizer /path/to/model.stl /path/to/sensors.csv
-```
+в исполняемый файл.
 
 После изменения файлов в `data/` повторите конфигурацию и сборку CMake, чтобы
 обновить данные внутри исполняемого файла.
+
+## Работа с Git и GitHub
+
+Основной рабочий процесс: разработка на компьютере, отправка изменений в GitHub,
+затем получение изменений и пересборка на Raspberry Pi.
 
 ## Разработка на macOS (Visual Studio Code)
 
