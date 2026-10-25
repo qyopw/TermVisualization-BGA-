@@ -26,23 +26,43 @@ Zero W v1.1 с Raspberry Pi OS 32-bit.
   также прокручивает его.
 - `Esc` закрывает приложение.
 
-## Rasberry Pi OS (32-bit)
+## Raspberry Pi OS (32-bit)
 
-Инструкция предназначена для Raspberry Pi Zero W v1.1 с Raspberry Pi OS
-32-bit Release 5.6 на `armhf`. Установите ОС с рабочим графическим окружением: приложение
-открывает SDL2-окно и из консоли без графической сессии не запустится.
+Инструкция предназначена для Raspberry Pi Zero W v1.1 и 32-битной Raspberry Pi
+OS (ARMHF, в том числе Release 5.6). Для первого запуска понадобятся microSD,
+карта на 16 ГБ или больше, блок питания, монитор с переходником mini-HDMI,
+USB OTG-переходник, клавиатура и мышь. У Zero W нет Ethernet, а Wi-Fi работает в диапазоне 2,4 ГГц.
 
-Проверьте архитектуру и установите инструменты сборки и SDL2:
+### Сборка и запуск
+
+Откройте Terminal в рабочем столе Pi, обновите систему и установите Git,
+компилятор, CMake и SDL2:
 
 ```bash
-dpkg --print-architecture
 sudo apt update
-sudo apt install -y build-essential cmake pkg-config libsdl2-dev
+sudo apt full-upgrade -y
+sudo apt install -y git build-essential cmake pkg-config libsdl2-dev
 ```
 
-`dpkg --print-architecture` должен вывести `armhf`. Собирайте приложение
-непосредственно на Pi Zero W: так получится совместимый ARMHF-файл. В корне
-проекта выполните:
+Проверьте версию ОС и архитектуру: `cat` должен показать нужный выпуск ОС,
+а `dpkg` — вывести `armhf`.
+
+```bash
+cat /etc/os-release
+dpkg --print-architecture
+```
+
+Скачайте опубликованную C++/SDL2-версию проекта и перейдите в её каталог. Если
+обновления ещё не отправлены в GitHub, сначала опубликуйте их из компьютера,
+на котором ведётся разработка.
+
+```bash
+git clone https://github.com/qyopw/TermVisualization-BGA-.git
+cd TermVisualization-BGA-
+```
+
+Соберите его непосредственно на Pi Zero W, чтобы получить ARMHF-файл. Сборка
+в один поток подходит для этой маломощной платы:
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -50,11 +70,12 @@ cmake --build build --parallel 1
 ./build/bga_visualizer
 ```
 
+Запускайте программу из Terminal, открытого в графическом рабочем столе, не
+через SSH или текстовую консоль: для SDL2 требуется активный графический сеанс.
 При конфигурации CMake файлы `data/model.stl` и `data/sensors.csv` встраиваются
-в исполняемый файл. Для переноса на другую Raspberry Pi с той же 32-битной ОС
-достаточно скопировать только `build/bga_visualizer`; рядом с ним не нужны
-исходники проекта или каталог `data`. На целевой системе должны быть SDL2
-runtime-библиотека и графический сеанс. Запускать файл нужно из рабочего стола.
+в исполняемый файл. Чтобы перенести его на другую Raspberry Pi с такой же
+32-битной ОС, скопируйте только `build/bga_visualizer`; на целевой Pi должны быть
+установлены SDL2 runtime-библиотека и системные библиотеки.
 
 Чтобы заменить встроенные данные, передайте пути к модели и CSV:
 
