@@ -3,11 +3,18 @@
 #include <array>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 struct CanFrame {
     std::uint32_t id = 0;
     std::uint8_t length = 0;
+    bool isExtended = false;
     std::array<std::uint8_t, 8> data{};
+};
+
+struct CanFilterId {
+    std::uint32_t id = 0;
+    bool isExtended = false;
 };
 
 struct SensorReading {
@@ -15,7 +22,11 @@ struct SensorReading {
     double temperatureC = 0.0;
 };
 
-// The 11-bit CAN ID is the decimal sensor ID; data[0..1] is a signed
-// little-endian temperature in hundredths of a degree C.
-bool parseSensorCanId(const std::string& sensorId, std::uint32_t& canId);
-bool decodeCanFrame(const CanFrame& frame, SensorReading& reading);
+// A frame ID selects a group of eight sensors; each data byte is one
+// unsigned whole-degree Celsius reading. Extended IDs also accept the
+// packed-decimal ID spelling used in the PCAN-View XMT file.
+bool buildCanFiltersForSensors(const std::vector<std::string>& sensorIds,
+                               std::vector<CanFilterId>& filters,
+                               std::string& error);
+bool decodeCanFrame(const CanFrame& frame,
+                    std::vector<SensorReading>& readings);

@@ -18,7 +18,7 @@ public:
     ~CanReceiver();
 
     bool start(const std::string& interfaceName,
-               const std::vector<std::uint32_t>& sensorCanIds,
+               const std::vector<CanFilterId>& canFilters,
                ReadingHandler onReading, std::string& error);
     void stop() noexcept;
 

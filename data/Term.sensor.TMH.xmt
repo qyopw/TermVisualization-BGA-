@@ -1,0 +1,25 @@
+; C:\Users\Akademik\Desktop\Term.sensor.TMH.xmt
+;   CAN messages saved by PCAN-View v6.1.0.1056
+;
+; Columns descriptions:
+; ~~~~~~~~~~~~~~~~~~~~~
+; +Message ID
+; |            +Cycle time in ms (0=manual)
+; |            |  +Data length
+; |            |  |  +Frame type
+; |            |  |  |  +Message data
+; |            |  |  |  |
+00000001h      1  8  D 00h 00h 00h 00h 00h 00h 00h 00h ; T.sensor 1-8
+00000002h      2  8  D 00h 00h 00h 00h 00h 00h 00h 00h ; T.sensor 9-16
+00000003h      3  8  D 00h 00h 00h 00h 00h 00h 00h 00h ; T.sensor 17-24
+00000004h      4  8  D 00h 00h 00h 00h 00h 00h 00h 00h ; T.sensor 25-32
+00000005h      5  8  D 00h 00h 00h 00h 00h 00h 00h 00h ; T.sensor 33-40
+00000006h      1  8  D 00h 00h 00h 00h 00h 00h 00h 00h ; T.sensor 41-48
+00000007h      2  8  D 00h 00h 00h 00h 00h 00h 00h 00h ; T.sensor 49-56
+00000008h      3  8  D 00h 00h 00h 00h 00h 00h 00h 00h ; T.sensor 57-64
+00000009h      4  8  D 00h 00h 00h 00h 00h 00h 00h 00h ; T.sensor 65-72
+00000010h      5  8  D 00h 00h 00h 00h 00h 00h 00h 00h ; T.sensor 73-80
+00000011h      1  8  D 00h 00h 00h 00h 00h 00h 00h 00h ; T.sensor 81-88
+00000012h      2  8  D 00h 00h 00h 00h 00h 00h 00h 00h ; T.sensor 89-96
+00000013h      3  8  D 00h 00h 00h 00h 00h 00h 00h 00h ; T.sensor 97-104
+00000014h      4  8  D 00h 00h 00h 00h 00h 00h 00h 00h ; T.sensor 105-107

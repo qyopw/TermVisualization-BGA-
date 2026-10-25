@@ -23,7 +23,6 @@
 #include <string_view>
 #include <system_error>
 #include <unordered_map>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -328,6 +327,8 @@ std::vector<Sensor> loadSensors(std::istream& input, const std::string& source,
     std::vector<Sensor> sensors;
     std::size_t outsideModelBounds = 0;
     const Vec3 modelExtent = modelBounds.maximum - modelBounds.minimum;
+    const Vec3 centeredMinimum = modelBounds.minimum - center;
+    const Vec3 centeredMaximum = modelBounds.maximum - center;
     const double boundsMargin =
         0.02 * std::max({modelExtent.x, modelExtent.y, modelExtent.z});
     std::size_t rowNumber = 1;
@@ -353,19 +354,19 @@ std::vector<Sensor> loadSensors(std::istream& input, const std::string& source,
             parseNumber(field("y"), "y coordinate", id),
             parseNumber(field("z"), "z coordinate", id),
         };
-        if (point.x < modelBounds.minimum.x - boundsMargin ||
-            point.x > modelBounds.maximum.x + boundsMargin ||
-            point.y < modelBounds.minimum.y - boundsMargin ||
-            point.y > modelBounds.maximum.y + boundsMargin ||
-            point.z < modelBounds.minimum.z - boundsMargin ||
-            point.z > modelBounds.maximum.z + boundsMargin) {
+        if (point.x < centeredMinimum.x - boundsMargin ||
+            point.x > centeredMaximum.x + boundsMargin ||
+            point.y < centeredMinimum.y - boundsMargin ||
+            point.y > centeredMaximum.y + boundsMargin ||
+            point.z < centeredMinimum.z - boundsMargin ||
+            point.z > centeredMaximum.z + boundsMargin) {
             ++outsideModelBounds;
         }
         if (id.empty()) {
             throw std::runtime_error("CSV row " + std::to_string(rowNumber) +
                                      " has an empty sensor ID.");
         }
-        sensors.push_back({id, (point - center) * scale});
+        sensors.push_back({id, point * scale});
     }
 
     if (sensors.empty()) {
@@ -975,32 +976,20 @@ int main(int argc, char* argv[]) {
         CanReceiver canReceiver;
         if (options.canEnabled) {
             std::string canError;
-            std::vector<std::uint32_t> sensorCanIds;
+            std::vector<std::string> sensorIds;
             for (const Sensor& sensor : sensorState.snapshot()) {
-                std::uint32_t canId = 0;
-                if (!parseSensorCanId(sensor.id, canId)) {
-                    canError = "Sensor ID '" + sensor.id +
-                               "' must be a canonical decimal value from 0 to 2047 "
-                               "to receive CAN data.";
-                    break;
-                }
-                sensorCanIds.push_back(canId);
+                sensorIds.push_back(sensor.id);
             }
-            std::unordered_set<std::string> unmatchedSensorIds;
-            const bool receiverStarted = !canError.empty()
-                ? false
-                : canReceiver.start(
-                      options.canInterface, sensorCanIds,
-                      [&sensorState, &unmatchedSensorIds](
-                          const SensorReading& reading) {
-                          if (!sensorState.updateTemperature(reading.sensorId,
-                                                             reading.temperatureC) &&
-                              unmatchedSensorIds.insert(reading.sensorId).second) {
-                              std::cerr << "Ignoring CAN ID " << reading.sensorId
-                                        << ": no sensor with that ID exists in the CSV.\n";
-                          }
-                      },
-                      canError);
+            std::vector<CanFilterId> canFilters;
+            const bool filtersBuilt =
+                buildCanFiltersForSensors(sensorIds, canFilters, canError);
+            const bool receiverStarted = filtersBuilt && canReceiver.start(
+                options.canInterface, canFilters,
+                [&sensorState](const SensorReading& reading) {
+                    sensorState.updateTemperature(reading.sensorId,
+                                                  reading.temperatureC);
+                },
+                canError);
             if (!receiverStarted) {
                 std::cerr << "Warning: " << canError
                           << " The visualizer will continue without CAN data.\n";
