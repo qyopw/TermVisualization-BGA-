@@ -1,6 +1,8 @@
 #define SDL_MAIN_HANDLED
 #include <SDL.h>
 #include "embedded_assets.h"
+#include "can_receiver.hpp"
+#include "sensor_state.hpp"
 
 #include <algorithm>
 #include <array>
@@ -21,6 +23,7 @@
 #include <string_view>
 #include <system_error>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -46,12 +49,6 @@ constexpr Pixel rgb(int red, int green, int blue) {
            (static_cast<Pixel>(green & 0xFF) << 8) |
            static_cast<Pixel>(blue & 0xFF);
 }
-
-struct Vec3 {
-    double x = 0.0;
-    double y = 0.0;
-    double z = 0.0;
-};
 
 Vec3 operator+(Vec3 left, Vec3 right) {
     return {left.x + right.x, left.y + right.y, left.z + right.z};
@@ -108,12 +105,6 @@ struct Bounds {
 struct Mesh {
     std::vector<Triangle> triangles;
     Bounds bounds;
-};
-
-struct Sensor {
-    std::string id;
-    Vec3 position;
-    double temperature = 0.0;
 };
 
 void include(Bounds& bounds, Vec3 point) {
@@ -327,10 +318,10 @@ std::vector<Sensor> loadSensors(std::istream& input, const std::string& source,
     for (std::size_t i = 0; i < headers.size(); ++i) {
         columns[lowercase(trim(headers[i]))] = i;
     }
-    for (const std::string required : {"id", "x", "y", "z", "temperature"}) {
+    for (const std::string required : {"id", "x", "y", "z"}) {
         if (columns.find(required) == columns.end()) {
             throw std::runtime_error(
-                "CSV must contain columns id,x,y,z,temperature.");
+                "CSV must contain columns id,x,y,z.");
         }
     }
 
@@ -370,9 +361,11 @@ std::vector<Sensor> loadSensors(std::istream& input, const std::string& source,
             point.z > modelBounds.maximum.z + boundsMargin) {
             ++outsideModelBounds;
         }
-        const double temperature =
-            parseNumber(field("temperature"), "temperature", id);
-        sensors.push_back({id, (point - center) * scale, temperature});
+        if (id.empty()) {
+            throw std::runtime_error("CSV row " + std::to_string(rowNumber) +
+                                     " has an empty sensor ID.");
+        }
+        sensors.push_back({id, (point - center) * scale});
     }
 
     if (sensors.empty()) {
@@ -394,8 +387,8 @@ struct ViewPoint {
 
 class Viewer {
 public:
-    Viewer(Mesh mesh, std::vector<Sensor> sensors)
-        : mesh_(std::move(mesh)), sensors_(std::move(sensors)),
+    Viewer(Mesh mesh, SensorState& sensors)
+        : mesh_(std::move(mesh)), sensors_(sensors),
           pixels_(static_cast<std::size_t>(kWidth) * kHeight),
           depthBuffer_(static_cast<std::size_t>(kWidth) * kHeight,
                        std::numeric_limits<double>::infinity()) {
@@ -448,7 +441,7 @@ private:
     SDL_Renderer* renderer_ = nullptr;
     SDL_Texture* texture_ = nullptr;
     Mesh mesh_;
-    std::vector<Sensor> sensors_;
+    SensorState& sensors_;
     std::vector<Pixel> pixels_;
     std::vector<double> depthBuffer_;
     double heading_ = 35.0;
@@ -502,6 +495,7 @@ private:
             {'Z', {31, 1, 2, 4, 8, 16, 31}},
             {'.', {0, 0, 0, 0, 0, 12, 12}},
             {':', {0, 12, 12, 0, 12, 12, 0}},
+            {'/', {1, 2, 4, 8, 16, 0, 0}},
             {'%', {17, 2, 4, 8, 17, 0, 0}},
             {'-', {0, 0, 0, 31, 0, 0, 0}},
             {'+', {0, 4, 4, 31, 4, 4, 0}},
@@ -707,8 +701,8 @@ private:
         }
     }
 
-    void drawSensors() {
-        for (const Sensor& sensor : sensors_) {
+    void drawSensors(const std::vector<Sensor>& sensors) {
+        for (const Sensor& sensor : sensors) {
             const ViewPoint point = transform(sensor.position);
             if (!std::isfinite(point.x) || !std::isfinite(point.y) ||
                 point.depth <= kNearPlane || point.x < -6.0 ||
@@ -722,11 +716,14 @@ private:
                 continue;
             }
             fillCircle(x, y, 6, rgb(242, 246, 250));
-            fillCircle(x, y, 4, temperatureColor(sensor.temperature));
+            const Pixel markerColor = sensor.hasCurrentReading
+                ? temperatureColor(sensor.temperature)
+                : rgb(116, 132, 151);
+            fillCircle(x, y, 4, markerColor);
         }
     }
 
-    void drawPanel() {
+    void drawPanel(const std::vector<Sensor>& sensors) {
         const Pixel panel = rgb(19, 25, 34);
         const Pixel border = rgb(54, 67, 84);
         const Pixel text = rgb(225, 232, 241);
@@ -744,7 +741,7 @@ private:
         fillCircle(knobX, kSliderY + 4, 8, rgb(91, 183, 240));
 
         fillRect(kPanelX + 14, 103, kPanelWidth - 28, 1, border);
-        drawText("SENSORS: " + std::to_string(sensors_.size()),
+        drawText("SENSORS: " + std::to_string(sensors.size()),
                  kPanelX + 20, 115, muted);
         drawText("ID", kPanelX + 20, 151, muted);
         drawText("TEMP C", kPanelX + 158, 151, muted);
@@ -754,33 +751,39 @@ private:
         const int tableTop = 174;
         const int visibleRows = (kHeight - tableTop - 24) / rowHeight;
         const int maximumScroll = std::max(
-            0, static_cast<int>(sensors_.size()) - visibleRows);
+            0, static_cast<int>(sensors.size()) - visibleRows);
         tableScroll_ = std::clamp(tableScroll_, 0, maximumScroll);
         for (int row = 0; row < visibleRows; ++row) {
             const int index = tableScroll_ + row;
-            if (index >= static_cast<int>(sensors_.size())) {
+            if (index >= static_cast<int>(sensors.size())) {
                 break;
             }
-            const Sensor& sensor = sensors_[static_cast<std::size_t>(index)];
+            const Sensor& sensor = sensors[static_cast<std::size_t>(index)];
             const int y = tableTop + row * rowHeight;
             if (row % 2 == 0) {
                 fillRect(kPanelX + 12, y, kPanelWidth - 24, rowHeight,
                          rgb(27, 35, 47));
             }
             drawText(sensor.id.substr(0, 14), kPanelX + 20, y + 7, text);
-            std::ostringstream temperature;
-            temperature << std::fixed << std::setprecision(1) << sensor.temperature;
-            drawText(temperature.str(), kPanelX + 158, y + 7,
-                     temperatureColor(sensor.temperature));
+            if (sensor.hasCurrentReading) {
+                std::ostringstream temperature;
+                temperature << std::fixed << std::setprecision(1)
+                            << sensor.temperature;
+                drawText(temperature.str(), kPanelX + 158, y + 7,
+                         temperatureColor(sensor.temperature));
+            } else {
+                drawText("N/A", kPanelX + 158, y + 7, muted);
+            }
         }
         drawText("PGUP PGDN SCROLL", kPanelX + 20, 462, muted);
     }
 
     void drawFrame() {
         std::fill(pixels_.begin(), pixels_.end(), rgb(25, 31, 41));
+        const std::vector<Sensor> sensors = sensors_.snapshot();
         drawModel();
-        drawSensors();
-        drawPanel();
+        drawSensors(sensors);
+        drawPanel(sensors);
         void* texturePixels = nullptr;
         int pitch = 0;
         if (SDL_LockTexture(texture_, nullptr, &texturePixels, &pitch) != 0) {
@@ -879,11 +882,52 @@ private:
     }
 };
 
+struct ProgramOptions {
+    std::string modelPath;
+    std::string sensorCsvPath;
+    std::string canInterface = "can0";
+    bool canEnabled = true;
+};
+
+ProgramOptions parseArguments(int argc, char* argv[]) {
+    ProgramOptions options;
+    for (int index = 1; index < argc; ++index) {
+        const std::string argument = argv[index];
+        if (argument == "--no-can") {
+            options.canEnabled = false;
+        } else if (argument == "--can-interface") {
+            if (index + 1 >= argc) {
+                throw std::runtime_error("--can-interface requires an interface name.");
+            }
+            options.canInterface = argv[++index];
+        } else if (argument.rfind("--can-interface=", 0) == 0) {
+            options.canInterface = argument.substr(std::string("--can-interface=").size());
+        } else if (argument.rfind("--", 0) == 0) {
+            throw std::runtime_error("Unknown option: " + argument);
+        } else if (options.modelPath.empty()) {
+            options.modelPath = argument;
+        } else if (options.sensorCsvPath.empty()) {
+            options.sensorCsvPath = argument;
+        } else {
+            throw std::runtime_error("Too many positional arguments.");
+        }
+    }
+    if (options.canInterface.empty()) {
+        throw std::runtime_error("CAN interface name cannot be empty.");
+    }
+    return options;
+}
+
 }  // namespace
 
 int main(int argc, char* argv[]) {
-    if (argc > 3) {
-        std::cerr << "Usage: bga_visualizer [model.stl] [sensors.csv]\n";
+    ProgramOptions options;
+    try {
+        options = parseArguments(argc, argv);
+    } catch (const std::exception& error) {
+        std::cerr << "Error: " << error.what() << '\n'
+                  << "Usage: bga_visualizer [model.stl] [sensors.csv] "
+                     "[--can-interface NAME] [--no-can]\n";
         return 2;
     }
 
@@ -895,8 +939,8 @@ int main(int argc, char* argv[]) {
 
     try {
         Mesh mesh;
-        if (argc >= 2) {
-            mesh = loadStl(argv[1]);
+        if (!options.modelPath.empty()) {
+            mesh = loadStl(options.modelPath);
         } else {
             const std::vector<unsigned char> modelBytes(
                 embedded_assets::model.begin(), embedded_assets::model.end());
@@ -908,13 +952,13 @@ int main(int argc, char* argv[]) {
         normalizeMesh(mesh, center, scale);
 
         std::vector<Sensor> sensors;
-        if (argc >= 3) {
-            std::ifstream sensorFile(argv[2]);
+        if (!options.sensorCsvPath.empty()) {
+            std::ifstream sensorFile(options.sensorCsvPath);
             if (!sensorFile) {
                 throw std::runtime_error("Cannot open sensor CSV file: " +
-                                         std::string(argv[2]));
+                                         options.sensorCsvPath);
             }
-            sensors = loadSensors(sensorFile, argv[2], center, scale,
+            sensors = loadSensors(sensorFile, options.sensorCsvPath, center, scale,
                                   originalBounds);
         } else {
             const std::string embeddedCsv(embedded_assets::sensors.begin(),
@@ -926,7 +970,49 @@ int main(int argc, char* argv[]) {
 
         std::cout << "Loaded " << mesh.triangles.size() << " STL triangles and "
                   << sensors.size() << " sensors.\n";
-        Viewer viewer(std::move(mesh), std::move(sensors));
+
+        SensorState sensorState(std::move(sensors));
+        CanReceiver canReceiver;
+        if (options.canEnabled) {
+            std::string canError;
+            std::vector<std::uint32_t> sensorCanIds;
+            for (const Sensor& sensor : sensorState.snapshot()) {
+                std::uint32_t canId = 0;
+                if (!parseSensorCanId(sensor.id, canId)) {
+                    canError = "Sensor ID '" + sensor.id +
+                               "' must be a canonical decimal value from 0 to 2047 "
+                               "to receive CAN data.";
+                    break;
+                }
+                sensorCanIds.push_back(canId);
+            }
+            std::unordered_set<std::string> unmatchedSensorIds;
+            const bool receiverStarted = !canError.empty()
+                ? false
+                : canReceiver.start(
+                      options.canInterface, sensorCanIds,
+                      [&sensorState, &unmatchedSensorIds](
+                          const SensorReading& reading) {
+                          if (!sensorState.updateTemperature(reading.sensorId,
+                                                             reading.temperatureC) &&
+                              unmatchedSensorIds.insert(reading.sensorId).second) {
+                              std::cerr << "Ignoring CAN ID " << reading.sensorId
+                                        << ": no sensor with that ID exists in the CSV.\n";
+                          }
+                      },
+                      canError);
+            if (!receiverStarted) {
+                std::cerr << "Warning: " << canError
+                          << " The visualizer will continue without CAN data.\n";
+            } else {
+                std::cout << "Listening for CAN data on " << options.canInterface
+                          << ".\n";
+            }
+        } else {
+            std::cout << "CAN reception disabled (--no-can).\n";
+        }
+
+        Viewer viewer(std::move(mesh), sensorState);
         return viewer.run();
     } catch (const std::exception& error) {
         std::cerr << "Error: " << error.what() << '\n';

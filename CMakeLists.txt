@@ -6,6 +6,8 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+find_package(Threads REQUIRED)
+
 # Embed the project data so the resulting executable can be copied on its own.
 file(READ "${PROJECT_SOURCE_DIR}/data/model.stl" MODEL_STL_HEX HEX)
 file(READ "${PROJECT_SOURCE_DIR}/data/sensors.csv" SENSOR_CSV_HEX HEX)
@@ -50,9 +52,22 @@ else()
     endif()
 endif()
 
-add_executable(bga_visualizer src/main.cpp)
+add_executable(bga_visualizer
+    src/main.cpp
+    src/sensor_state.cpp
+    src/can_protocol.cpp
+    src/can_receiver.cpp
+)
 target_include_directories(bga_visualizer PRIVATE "${PROJECT_BINARY_DIR}/generated")
-target_link_libraries(bga_visualizer PRIVATE ${BGA_SDL_TARGET})
+target_link_libraries(bga_visualizer PRIVATE ${BGA_SDL_TARGET} Threads::Threads)
+
+# SocketCAN is a Linux kernel API. Keep it out of non-Linux builds so the
+# visualizer remains usable there in --no-can mode.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_compile_definitions(bga_visualizer PRIVATE BGA_HAS_SOCKETCAN=1)
+else()
+    target_compile_definitions(bga_visualizer PRIVATE BGA_HAS_SOCKETCAN=0)
+endif()
 
 if(MSVC)
     target_compile_options(bga_visualizer PRIVATE /W4 /permissive-)
