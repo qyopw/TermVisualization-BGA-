@@ -1,0 +1,55 @@
+cpt@raspberrypi:~ $ sudo ip link set can0 down
+cpt@raspberrypi:~ $ cat /proc/interrupts
+           CPU0       
+ 17:        912  ARMCTRL-level   1 Edge      2000b880.mailbox
+ 18:         75  ARMCTRL-level   2 Edge      VCHIQ doorbell
+ 27:      85765  ARMCTRL-level  35 Edge      timer
+ 34:          0  ARMCTRL-level  42 Edge      vc4
+ 35:          0  ARMCTRL-level  43 Edge      20004000.txp
+ 42:        392  ARMCTRL-level  50 Edge      DMA IRQ
+ 44:      15409  ARMCTRL-level  52 Edge      DMA IRQ
+ 45:          0  ARMCTRL-level  53 Edge      DMA IRQ
+ 48:          0  ARMCTRL-level  56 Edge      DMA IRQ
+ 49:          0  ARMCTRL-level  57 Edge      DMA IRQ
+ 53:         52  ARMCTRL-level  61 Edge      ttyS0
+ 56:     839389  ARMCTRL-level  64 Edge      dwc_otg, dwc_otg_pcd, dwc_otg_hcd:usb1
+ 57:         39  ARMCTRL-level  65 Edge      vc4 hvs
+ 64:          0  ARMCTRL-level  72 Edge      vc4 hdmi cec
+ 66:         39  ARMCTRL-level  74 Edge      vc4 crtc
+ 69:          0  ARMCTRL-level  77 Edge      vc4 crtc
+ 70:          0  ARMCTRL-level  78 Edge      vc4 crtc
+ 77:       1794  ARMCTRL-level  85 Edge      20804000.i2c, 20805000.i2c
+ 78:    2227169  ARMCTRL-level  86 Edge      20204000.spi
+ 80:       3739  ARMCTRL-level  88 Edge      mmc0
+ 81:          0  ARMCTRL-level  89 Edge      uart-pl011
+ 86:      15097  ARMCTRL-level  94 Edge      mmc1
+FIQ:              usb_fiq
+Err:          0
+cpt@raspberrypi:~ $ sudo ip link set can0 up
+cpt@raspberrypi:~ $ cat /proc/interrupts
+           CPU0       
+ 17:        950  ARMCTRL-level   1 Edge      2000b880.mailbox
+ 18:         75  ARMCTRL-level   2 Edge      VCHIQ doorbell
+ 27:      88143  ARMCTRL-level  35 Edge      timer
+ 34:          0  ARMCTRL-level  42 Edge      vc4
+ 35:          0  ARMCTRL-level  43 Edge      20004000.txp
+ 42:        400  ARMCTRL-level  50 Edge      DMA IRQ
+ 44:      15565  ARMCTRL-level  52 Edge      DMA IRQ
+ 45:          0  ARMCTRL-level  53 Edge      DMA IRQ
+ 48:          0  ARMCTRL-level  56 Edge      DMA IRQ
+ 49:          0  ARMCTRL-level  57 Edge      DMA IRQ
+ 53:         52  ARMCTRL-level  61 Edge      ttyS0
+ 56:     867160  ARMCTRL-level  64 Edge      dwc_otg, dwc_otg_pcd, dwc_otg_hcd:usb1
+ 57:         39  ARMCTRL-level  65 Edge      vc4 hvs
+ 64:          0  ARMCTRL-level  72 Edge      vc4 hdmi cec
+ 66:         39  ARMCTRL-level  74 Edge      vc4 crtc
+ 69:          0  ARMCTRL-level  77 Edge      vc4 crtc
+ 70:          0  ARMCTRL-level  78 Edge      vc4 crtc
+ 77:       1846  ARMCTRL-level  85 Edge      20804000.i2c, 20805000.i2c
+ 78:    2383600  ARMCTRL-level  86 Edge      20204000.spi
+ 80:       3894  ARMCTRL-level  88 Edge      mmc0
+ 81:          0  ARMCTRL-level  89 Edge      uart-pl011
+ 86:      15352  ARMCTRL-level  94 Edge      mmc1
+160:    2587595  pinctrl-bcm2835  25 Level     spi0.0
+FIQ:              usb_fiq
+Err:          0
