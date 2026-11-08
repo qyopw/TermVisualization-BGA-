@@ -1,16 +1,18 @@
-{
+﻿{
     // Используйте IntelliSense, чтобы узнать о возможных атрибутах.
     // Наведите указатель мыши, чтобы просмотреть описания существующих атрибутов.
     // Для получения дополнительной информации посетите: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Launch",
-            "type": "lldb",
+            "name": "Launch (Windows)",
+            "type": "cppvsdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/build/bga_visualizer",
-            "args": [],
-            "cwd": "${workspaceFolder}"
+            "program": "${workspaceFolder}/build/Release/bga_visualizer.exe",
+            "args": ["--no-can"],
+            "cwd": "${workspaceFolder}",
+            "stopAtEntry": false,
+            "console": "integratedTerminal"
         }
     ]
 }

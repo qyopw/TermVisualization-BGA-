@@ -1,4 +1,4 @@
-# TermVisualization-BGA
+﻿# TermVisualization-BGA
 
 Небольшое приложение на C++17 и SDL2 для просмотра STL-модели и температурных датчиков. Модель и точки растеризуются на CPU, а SDL2 создаёт окно и передаёт события мыши и клавиатуры. На Linux приложение получает температуры в отдельном потоке через SocketCAN CAN RAW. Целевая платформа — Raspberry Pi Zero W v1.1 с Raspberry Pi OS 32-bit и CAN-контроллером MCP2515.
 
@@ -25,7 +25,7 @@
 
 ## Raspberry Pi OS (32-bit)
 
-Инструкция предназначена для Raspberry Pi Zero W v1.1 и 32-битной PiOS (ARMHF). У Zero W нет Ethernet, а Wi-Fi работает в диапазоне 2,4 ГГц.
+Инструкция предназначена для Raspberry Pi Zero W v1.1 и 32-битной PiOS (ARMHF). 
 
 ### Сборка проекта
 
@@ -148,9 +148,20 @@ cmake --build build
 
 ## Разработка на Windows (Visual Studio Code)
 
-Установите VS Code, CMake, Git и Visual Studio Build Tools с компонентом
-**Desktop development with C++**. Затем откройте PowerShell и установите SDL2
-через vcpkg:
+### Предварительные требования
+
+Установите следующее ПО:
+
+1. **Visual Studio 2022 Community** (или Visual Studio Build Tools) с нагрузкой
+   **Разработка классических приложений на C++** (*Desktop development with C++*).
+   Это даст компилятор MSVC, линковщик и генератор CMake для Visual Studio.
+2. **CMake** (https://cmake.org/download/) — добавьте `cmake.exe` в PATH.
+3. **Git** (https://git-scm.com/download/win) — добавьте `git.exe` в PATH.
+4. **VS Code** с расширением **C/C++** (опционально).
+
+### Установка SDL2 через vcpkg
+
+Откройте PowerShell и выполните:
 
 ```powershell
 git clone https://github.com/microsoft/vcpkg "$env:USERPROFILE/vcpkg"
@@ -158,15 +169,51 @@ git clone https://github.com/microsoft/vcpkg "$env:USERPROFILE/vcpkg"
 & "$env:USERPROFILE/vcpkg/vcpkg.exe" install sdl2:x64-windows
 ```
 
-Из корня проекта настройте и соберите приложение:
+### Сборка приложения
+
+Из корня проекта выполните настройку и сборку через CMake:
 
 ```powershell
-cmake -S . -B build `
-  -DCMAKE_TOOLCHAIN_FILE="$env:USERPROFILE/vcpkg/scripts/buildsystems/vcpkg.cmake"
+cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE="$env:USERPROFILE/vcpkg/scripts/buildsystems/vcpkg.cmake" -A x64
 cmake --build build --config Release
 ```
 
-Запустите `build\Release\bga_visualizer.exe --no-can` из PowerShell. SocketCAN доступен только в Linux-сборке.
+Ключ `-A x64` явно указывает 64-битную сборку (совместимую с `sdl2:x64-windows`).
+
+### Запуск приложения
+
+Запустите собранный исполняемый файл с отключённым CAN-приёмом (SocketCAN доступен
+только в Linux-сборке):
+
+```powershell
+.\build\Release\bga_visualizer.exe --no-can
+```
+
+### Важно: SDL2.dll
+
+Для запуска `bga_visualizer.exe` рядом с ним должен находиться `SDL2.dll`.
+Скопируйте его из каталога установки vcpkg:
+
+```powershell
+Copy-Item "$env:USERPROFILE\vcpkg\installed\x64-windows\bin\SDL2.dll" ".\build\Release\SDL2.dll"
+```
+
+Если вы запускаете программу из другой рабочей директории, убедитесь, что
+`SDL2.dll` доступна в PATH или лежит рядом с `.exe`.
+
+### Параметры командной строки
+
+```
+bga_visualizer.exe [model.stl] [sensors.csv] [--can-interface NAME] [--no-can]
+```
+
+Без аргументов используются встроенные в исполняемый файл модель и список датчиков.
+На Windows всегда запускайте с `--no-can`.
+
+### Пересборка после изменений
+
+После изменения исходников или файлов в `data/` повторно выполните обе команды
+CMake (настройку и сборку). Скрипт `rebuild.sh` предназначен только для Linux.
 
 ## Внешние данные
 
@@ -176,3 +223,5 @@ cmake --build build --config Release
 ```bash
 ./build/bga_visualizer path/to/model.stl path/to/sensors.csv --no-can
 ```
+
+
