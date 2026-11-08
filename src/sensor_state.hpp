@@ -16,6 +16,7 @@ struct Vec3 {
 struct Sensor {
     std::string id;
     Vec3 position;
+    int group = -1;
     double temperature = 0.0;
     bool hasCurrentReading = false;
     std::chrono::steady_clock::time_point lastUpdated{};

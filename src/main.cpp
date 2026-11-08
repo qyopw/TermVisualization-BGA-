@@ -40,6 +40,20 @@ constexpr int kSliderWidth = kPanelWidth - 40;
 constexpr double kModelSize = 10.0;
 constexpr double kNearPlane = 0.1;
 
+// Bottom control panel (lower third of the model area).
+constexpr int kBottomPanelY = 340;
+constexpr int kBottomPanelHeight = kHeight - kBottomPanelY;
+constexpr int kGroupLabelY = kBottomPanelY + 10;
+constexpr int kGroupCheckboxY = kBottomPanelY + 26;
+constexpr int kGroupCheckboxSize = 16;
+constexpr int kGroupCheckboxSpacingX = 22;
+constexpr int kGroupCheckboxSpacingY = 20;
+constexpr int kGroupStartX = 8;
+constexpr int kModelTransparencyY = kBottomPanelY + 36;
+constexpr int kModelZOffsetY = kBottomPanelY + 86;
+constexpr int kBottomSliderX = 167;
+constexpr int kBottomSliderWidth = 340;
+
 using Pixel = std::uint32_t;
 
 constexpr Pixel rgb(int red, int green, int blue) {
@@ -317,6 +331,8 @@ std::vector<Sensor> loadSensors(std::istream& input, const std::string& source,
     for (std::size_t i = 0; i < headers.size(); ++i) {
         columns[lowercase(trim(headers[i]))] = i;
     }
+    const bool hasGroupColumn = columns.find("group") != columns.end();
+
     for (const std::string required : {"id", "x", "y", "z"}) {
         if (columns.find(required) == columns.end()) {
             throw std::runtime_error(
@@ -366,7 +382,12 @@ std::vector<Sensor> loadSensors(std::istream& input, const std::string& source,
             throw std::runtime_error("CSV row " + std::to_string(rowNumber) +
                                      " has an empty sensor ID.");
         }
-        sensors.push_back({id, point * scale});
+
+        int group = -1;
+        if (hasGroupColumn) {
+            group = static_cast<int>(parseNumber(field("group"), "group", id));
+        }
+        sensors.push_back({id, point * scale, group});
     }
 
     if (sensors.empty()) {
@@ -393,6 +414,8 @@ public:
           pixels_(static_cast<std::size_t>(kWidth) * kHeight),
           depthBuffer_(static_cast<std::size_t>(kWidth) * kHeight,
                        std::numeric_limits<double>::infinity()) {
+        groupVisible_.fill(true);
+        groupExpanded_.fill(true);
         window_ = SDL_CreateWindow(
             "BGA Temperature Visualizer", SDL_WINDOWPOS_CENTERED,
             SDL_WINDOWPOS_CENTERED, kWidth, kHeight,
@@ -449,11 +472,51 @@ private:
     double pitch_ = 20.0;
     double distance_ = 18.0;
     double transparency_ = 0.0;
+    double modelZOffset_ = 0.0;
     bool rotating_ = false;
     bool changingTransparency_ = false;
+    bool changingModelZOffset_ = false;
     int lastMouseX_ = 0;
     int lastMouseY_ = 0;
     int tableScroll_ = 0;
+    std::array<bool, 35> groupVisible_{};
+    std::array<bool, 35> groupExpanded_{};
+    std::vector<SDL_Rect> groupCheckboxes_;
+    SDL_Rect collapseAllButton_{};
+    SDL_Rect bottomModelSlider_{};
+    SDL_Rect bottomZOffsetSlider_{};
+
+    struct DisplayEntry {
+        bool isGroup = false;
+        int groupId = -1;
+        std::size_t sensorIndex = 0;
+    };
+    std::vector<DisplayEntry> displayEntries_;
+
+    void toggleGroupVisibility(int group) {
+        if (group >= 0 && group < 35) {
+            groupVisible_[group] = !groupVisible_[group];
+        }
+    }
+
+    void toggleGroupExpanded(int group) {
+        if (group >= 0 && group < 35) {
+            groupExpanded_[group] = !groupExpanded_[group];
+        }
+    }
+
+    void toggleAllGroupsExpanded() {
+        bool allExpanded = true;
+        for (int g = 0; g < 35; ++g) {
+            if (!groupExpanded_[g]) {
+                allExpanded = false;
+                break;
+            }
+        }
+        for (int g = 0; g < 35; ++g) {
+            groupExpanded_[g] = !allExpanded;
+        }
+    }
 
     static const std::array<std::uint8_t, 7>& glyph(char character) {
         static const std::unordered_map<char, std::array<std::uint8_t, 7>> font = {
@@ -568,13 +631,14 @@ private:
 
         const double x = point.x * cosHeading - point.y * sinHeading;
         const double horizontalY = point.x * sinHeading + point.y * cosHeading;
-        const double y = horizontalY * cosPitch - point.z * sinPitch;
-        const double z = horizontalY * sinPitch + point.z * cosPitch;
+        const double zPoint = point.z + modelZOffset_;
+        const double y = horizontalY * cosPitch - zPoint * sinPitch;
+        const double z = horizontalY * sinPitch + zPoint * cosPitch;
         const double depth = distance_ - z;
         const double focalLength = 410.0;
         return {
             272.0 + focalLength * x / std::max(depth, kNearPlane),
-            240.0 - focalLength * y / std::max(depth, kNearPlane),
+            220.0 - focalLength * y / std::max(depth, kNearPlane),
             depth,
         };
     }
@@ -704,6 +768,9 @@ private:
 
     void drawSensors(const std::vector<Sensor>& sensors) {
         for (const Sensor& sensor : sensors) {
+            if (sensor.group >= 0 && !groupVisible_[sensor.group]) {
+                continue;
+            }
             const ViewPoint point = transform(sensor.position);
             if (!std::isfinite(point.x) || !std::isfinite(point.y) ||
                 point.depth <= kNearPlane || point.x < -6.0 ||
@@ -716,11 +783,11 @@ private:
             if (x < 0 || x >= kPanelX || y < 0 || y >= kHeight) {
                 continue;
             }
-            fillCircle(x, y, 6, rgb(242, 246, 250));
             const Pixel markerColor = sensor.hasCurrentReading
                 ? temperatureColor(sensor.temperature)
                 : rgb(116, 132, 151);
-            fillCircle(x, y, 4, markerColor);
+            fillCircle(x, y, 4, rgb(242, 246, 250));
+            fillCircle(x, y, 3, markerColor);
         }
     }
 
@@ -732,51 +799,173 @@ private:
         fillRect(kPanelX, 0, kPanelWidth, kHeight, panel);
         fillRect(kPanelX, 0, 1, kHeight, border);
         drawText("BGA VIEWER", kPanelX + 20, 16, text, 2);
-        drawText("MODEL TRANSPARENCY", kPanelX + 20, 49, muted);
 
-        const int percent = static_cast<int>(std::lround(transparency_ * 100.0));
-        drawText(std::to_string(percent) + "%", kPanelX + 205, 48, text);
-        fillRect(kSliderX, kSliderY, kSliderWidth, 8, rgb(58, 72, 90));
-        const int knobX = kSliderX + static_cast<int>(std::lround(
-            (transparency_ / 0.95) * kSliderWidth));
-        fillCircle(knobX, kSliderY + 4, 8, rgb(91, 183, 240));
+        // Collapse all button at the top of the list.
+        collapseAllButton_ = {kPanelX + 20, 42, 100, 18};
+        const Pixel buttonColor = rgb(58, 72, 90);
+        fillRect(collapseAllButton_.x, collapseAllButton_.y,
+                 collapseAllButton_.w, collapseAllButton_.h, buttonColor);
+        drawText("COLLAPSE ALL", collapseAllButton_.x + 6,
+                 collapseAllButton_.y + 4, text);
 
-        fillRect(kPanelX + 14, 103, kPanelWidth - 28, 1, border);
-        drawText("SENSORS: " + std::to_string(sensors.size()),
-                 kPanelX + 20, 115, muted);
-        drawText("ID", kPanelX + 20, 151, muted);
-        drawText("TEMP C", kPanelX + 158, 151, muted);
-        fillRect(kPanelX + 14, 166, kPanelWidth - 28, 1, border);
+        fillRect(kPanelX + 14, 66, kPanelWidth - 28, 1, border);
+        drawText("ID", kPanelX + 20, 78, muted);
+        drawText("TEMP C", kPanelX + 158, 78, muted);
+        // Build flat list of display entries: group headers + sensors.
+        displayEntries_.clear();
+        for (int g = 0; g < 35; ++g) {
+            bool hasSensorsInGroup = false;
+            for (const auto& s : sensors) {
+                if (s.group == g) {
+                    hasSensorsInGroup = true;
+                    break;
+                }
+            }
+            if (!hasSensorsInGroup) {
+                continue;
+            }
+            displayEntries_.push_back({true, g, 0});
+            if (groupExpanded_[g]) {
+                for (std::size_t i = 0; i < sensors.size(); ++i) {
+                    if (sensors[i].group == g) {
+                        displayEntries_.push_back({false, g, i});
+                    }
+                }
+            }
+        }
+        // Ungrouped sensors (group == -1).
+        bool hasUngrouped = false;
+        for (const auto& s : sensors) {
+            if (s.group < 0) {
+                hasUngrouped = true;
+                break;
+            }
+        }
+        if (hasUngrouped) {
+            displayEntries_.push_back({true, -1, 0});
+            for (std::size_t i = 0; i < sensors.size(); ++i) {
+                if (sensors[i].group < 0) {
+                    displayEntries_.push_back({false, -1, i});
+                }
+            }
+        }
 
-        constexpr int rowHeight = 22;
-        const int tableTop = 174;
-        const int visibleRows = (kHeight - tableTop - 24) / rowHeight;
+        constexpr int rowHeight = 20;
+        const int tableTop = 102;
+        const int visibleRows = (kHeight - 30 - tableTop) / rowHeight;
         const int maximumScroll = std::max(
-            0, static_cast<int>(sensors.size()) - visibleRows);
+            0, static_cast<int>(displayEntries_.size()) - visibleRows);
         tableScroll_ = std::clamp(tableScroll_, 0, maximumScroll);
         for (int row = 0; row < visibleRows; ++row) {
             const int index = tableScroll_ + row;
-            if (index >= static_cast<int>(sensors.size())) {
+            if (index >= static_cast<int>(displayEntries_.size())) {
                 break;
             }
-            const Sensor& sensor = sensors[static_cast<std::size_t>(index)];
+            const DisplayEntry& entry =
+                displayEntries_[static_cast<std::size_t>(index)];
             const int y = tableTop + row * rowHeight;
             if (row % 2 == 0) {
                 fillRect(kPanelX + 12, y, kPanelWidth - 24, rowHeight,
                          rgb(27, 35, 47));
             }
-            drawText(sensor.id.substr(0, 14), kPanelX + 20, y + 7, text);
-            if (sensor.hasCurrentReading) {
-                std::ostringstream temperature;
-                temperature << std::fixed << std::setprecision(1)
-                            << sensor.temperature;
-                drawText(temperature.str(), kPanelX + 158, y + 7,
-                         temperatureColor(sensor.temperature));
+            if (entry.isGroup) {
+                const char arrow = groupExpanded_[entry.groupId] ? '+' : '-';
+                drawText(std::string(1, arrow) + " Group " +
+                             std::to_string(entry.groupId),
+                         kPanelX + 20, y + 5, text);
             } else {
-                drawText("N/A", kPanelX + 158, y + 7, muted);
+                const Sensor& sensor =
+                    sensors[entry.sensorIndex];
+                drawText("----" + sensor.id.substr(0, 10), kPanelX + 28,
+                         y + 5, text);
+                if (sensor.hasCurrentReading) {
+                    std::ostringstream temperature;
+                    temperature << std::fixed << std::setprecision(1)
+                                << sensor.temperature;
+                    drawText(temperature.str(), kPanelX + 158, y + 5,
+                             temperatureColor(sensor.temperature));
+                } else {
+                    drawText("N/A", kPanelX + 158, y + 5, muted);
+                }
             }
         }
-        drawText("PGUP PGDN SCROLL", kPanelX + 20, 462, muted);
+        drawText("Use PageUp/Down to Scroll", kPanelX + 20, kHeight - 24,
+                 muted);
+        drawText("sensors: " + std::to_string(sensors.size()),
+                 kPanelX + kPanelWidth - 110, kHeight - 8, muted);
+    }
+
+    void drawBottomControls(const std::vector<Sensor>& /*sensors*/) {
+        const Pixel panel = rgb(19, 25, 34);
+        const Pixel border = rgb(54, 67, 84);
+        const Pixel text = rgb(225, 232, 241);
+        const Pixel muted = rgb(155, 170, 188);
+
+        // Bottom panel background.
+        fillRect(0, kBottomPanelY, kPanelX, kBottomPanelHeight, panel);
+        fillRect(0, kBottomPanelY, kPanelX, 1, border);
+
+        // GRouPS label.
+        drawText("GRouPS", 10, kGroupLabelY, muted);
+
+        // Group visibility checkboxes: 7 columns x 5 rows (35 groups).
+        groupCheckboxes_.clear();
+        for (int g = 0; g < 35; ++g) {
+            const int col = g % 7;
+            const int row = g / 7;
+            SDL_Rect rect{
+                kGroupStartX + col * kGroupCheckboxSpacingX,
+                kGroupCheckboxY + row * kGroupCheckboxSpacingY,
+                kGroupCheckboxSize,
+                kGroupCheckboxSize,
+            };
+            groupCheckboxes_.push_back(rect);
+
+            const Pixel checkColor = groupVisible_[g]
+                ? rgb(91, 183, 240)
+                : rgb(58, 72, 90);
+            fillRect(rect.x, rect.y, rect.w, rect.h, checkColor);
+            fillRect(rect.x + 3, rect.y + 3, rect.w - 6, rect.h - 6,
+                     rgb(19, 25, 34));
+            drawText(std::to_string(g), rect.x + 5, rect.y + 3, text);
+        }
+
+        // MODEL TRANSPARENCY slider.
+        drawText("MODEL TRANSPARENCY", kBottomSliderX, kModelTransparencyY,
+                 muted);
+        const int modelPercent =
+            static_cast<int>(std::lround(transparency_ * 100.0));
+        drawText(std::to_string(modelPercent) + "%",
+                 kBottomSliderX + kBottomSliderWidth + 10,
+                 kModelTransparencyY, text);
+        bottomModelSlider_ = {kBottomSliderX, kModelTransparencyY + 14,
+                              kBottomSliderWidth, 12};
+        fillRect(bottomModelSlider_.x, bottomModelSlider_.y,
+                 bottomModelSlider_.w, bottomModelSlider_.h,
+                 rgb(58, 72, 90));
+        const int modelKnobX = kBottomSliderX +
+            static_cast<int>(std::lround(
+                (transparency_ / 0.95) * kBottomSliderWidth));
+        fillCircle(modelKnobX, bottomModelSlider_.y + 6, 7,
+                   rgb(91, 183, 240));
+
+        // MODEL Z OFFSET slider.
+        drawText("MODEL Z OFFSET", kBottomSliderX, kModelZOffsetY, muted);
+        const int zOffsetPercent =
+            static_cast<int>(std::lround((modelZOffset_ + 10.0) / 20.0 * 100.0));
+        drawText(std::to_string(zOffsetPercent) + "%",
+                 kBottomSliderX + kBottomSliderWidth + 10,
+                 kModelZOffsetY, text);
+        bottomZOffsetSlider_ = {kBottomSliderX, kModelZOffsetY + 14,
+                                kBottomSliderWidth, 12};
+        fillRect(bottomZOffsetSlider_.x, bottomZOffsetSlider_.y,
+                 bottomZOffsetSlider_.w, bottomZOffsetSlider_.h,
+                 rgb(58, 72, 90));
+        const int zOffsetKnobX = kBottomSliderX +
+            static_cast<int>(std::lround(
+                ((modelZOffset_ + 10.0) / 20.0) * kBottomSliderWidth));
+        fillCircle(zOffsetKnobX, bottomZOffsetSlider_.y + 6, 7,
+                   rgb(91, 183, 240));
     }
 
     void drawFrame() {
@@ -784,6 +973,7 @@ private:
         const std::vector<Sensor> sensors = sensors_.snapshot();
         drawModel();
         drawSensors(sensors);
+        drawBottomControls(sensors);
         drawPanel(sensors);
         void* texturePixels = nullptr;
         int pitch = 0;
@@ -806,9 +996,15 @@ private:
     }
 
     void setTransparency(int mouseX) {
-        const double relative = static_cast<double>(mouseX - kSliderX) /
-                                static_cast<double>(kSliderWidth);
+        const double relative = static_cast<double>(mouseX - kBottomSliderX) /
+                                static_cast<double>(kBottomSliderWidth);
         transparency_ = std::clamp(relative * 0.95, 0.0, 0.95);
+    }
+
+    void setModelZOffset(int mouseX) {
+        const double relative = static_cast<double>(mouseX - kBottomSliderX) /
+                                static_cast<double>(kBottomSliderWidth);
+        modelZOffset_ = std::clamp(relative * 20.0 - 10.0, -10.0, 10.0);
     }
 
     void changeZoom(double factor) {
@@ -822,10 +1018,41 @@ private:
         if (event.type == SDL_MOUSEBUTTONDOWN && event.button.button == SDL_BUTTON_LEFT) {
             const int x = event.button.x;
             const int y = event.button.y;
-            if (x >= kSliderX - 10 && x <= kSliderX + kSliderWidth + 10 &&
-                y >= kSliderY - 10 && y <= kSliderY + 18) {
+            if (x >= kBottomSliderX - 10 &&
+                x <= kBottomSliderX + kBottomSliderWidth + 10 &&
+                y >= kModelTransparencyY + 4 && y <= kModelTransparencyY + 22) {
                 changingTransparency_ = true;
                 setTransparency(x);
+            } else if (x >= kBottomSliderX - 10 &&
+                x <= kBottomSliderX + kBottomSliderWidth + 10 &&
+                y >= kModelZOffsetY + 4 && y <= kModelZOffsetY + 22) {
+                changingModelZOffset_ = true;
+                setModelZOffset(x);
+            } else if (x >= kPanelX && y >= 42 && y < 60) {
+                // Collapse all button click.
+                toggleAllGroupsExpanded();
+            } else if (x >= kPanelX && y >= 102 && y < kHeight - 30) {
+                // Group expand/collapse arrow click in table.
+                const int row = (y - 102) / 20;
+                const int entryIndex = tableScroll_ + row;
+                if (entryIndex >= 0 &&
+                    entryIndex < static_cast<int>(displayEntries_.size())) {
+                    const DisplayEntry& entry =
+                        displayEntries_[static_cast<std::size_t>(entryIndex)];
+                    if (entry.isGroup) {
+                        toggleGroupExpanded(entry.groupId);
+                    }
+                }
+            } else if (y >= kBottomPanelY && y < kHeight && x < kPanelX) {
+                // Bottom group checkboxes click (lower left).
+                for (int g = 0; g < 35 && g < static_cast<int>(groupCheckboxes_.size()); ++g) {
+                    const SDL_Rect& rect = groupCheckboxes_[static_cast<std::size_t>(g)];
+                    if (x >= rect.x && x < rect.x + rect.w &&
+                        y >= rect.y && y < rect.y + rect.h) {
+                        toggleGroupVisibility(g);
+                        break;
+                    }
+                }
             } else if (x < kPanelX) {
                 rotating_ = true;
                 lastMouseX_ = x;
@@ -835,9 +1062,12 @@ private:
                    event.button.button == SDL_BUTTON_LEFT) {
             rotating_ = false;
             changingTransparency_ = false;
+            changingModelZOffset_ = false;
         } else if (event.type == SDL_MOUSEMOTION) {
             if (changingTransparency_) {
                 setTransparency(event.motion.x);
+            } else if (changingModelZOffset_) {
+                setModelZOffset(event.motion.x);
             } else if (rotating_) {
                 heading_ -= (event.motion.x - lastMouseX_) * 0.6;
                 pitch_ = std::clamp(
@@ -849,8 +1079,8 @@ private:
             int x = 0;
             int y = 0;
             SDL_GetMouseState(&x, &y);
-            if (x >= kPanelX && y >= 174 && y < kHeight - 18) {
-                tableScroll_ -= event.wheel.y * 3;
+            if (x >= kPanelX && y >= 102 && y < kHeight - 30) {
+                tableScroll_ -= event.wheel.y;
             } else if (event.wheel.y > 0) {
                 if (x < kPanelX) changeZoom(0.9);
             } else if (event.wheel.y < 0) {
@@ -861,10 +1091,10 @@ private:
                 case SDLK_ESCAPE:
                     return false;
                 case SDLK_PAGEUP:
-                    tableScroll_ -= 8;
+                    tableScroll_ -= 1;
                     break;
                 case SDLK_PAGEDOWN:
-                    tableScroll_ += 8;
+                    tableScroll_ += 1;
                     break;
                 case SDLK_PLUS:
                 case SDLK_KP_PLUS:

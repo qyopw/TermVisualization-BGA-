@@ -11,6 +11,9 @@ SensorState::SensorState(std::vector<Sensor> sensors)
         if (sensors_[index].id.empty()) {
             throw std::invalid_argument("Sensor IDs cannot be empty.");
         }
+        if (sensors_[index].group < -1) {
+            throw std::invalid_argument("Sensor group cannot be less than -1.");
+        }
         if (!sensorIndexById_.emplace(sensors_[index].id, index).second) {
             throw std::invalid_argument("Duplicate sensor ID: " + sensors_[index].id);
         }
