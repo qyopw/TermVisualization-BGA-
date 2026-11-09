@@ -14,3 +14,5 @@ cmake --build build --parallel 1
 
 echo "=== Сборка успешно завершена ==="
 echo "Исполняемый файл: $(pwd)/build/bga_visualizer"
+
+
