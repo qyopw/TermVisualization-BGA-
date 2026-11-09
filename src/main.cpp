@@ -354,6 +354,18 @@ std::vector<Sensor> loadSensors(std::istream& input, const std::string& source,
             continue;
         }
         const std::vector<std::string> fields = parseCsvLine(line);
+        // Пропускаем строки, состоящие только из разделителей (например "...,,,"),
+        // которые могут встречаться в конце CSV-файла.
+        bool allEmpty = true;
+        for (const auto& f : fields) {
+            if (!f.empty()) {
+                allEmpty = false;
+                break;
+            }
+        }
+        if (allEmpty) {
+            continue;
+        }
         const auto field = [&fields, &columns, rowNumber](const std::string& name)
             -> const std::string& {
             const std::size_t column = columns.at(name);
