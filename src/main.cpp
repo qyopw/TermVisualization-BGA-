@@ -617,7 +617,8 @@ private:
         file << "# Конфигурация приложения TermVisualization-BGA\n";
         file << "# Строки, начинающиеся с #, являются комментариями.\n\n";
         file << "# 1. Параметры запуска программы\n";
-        file << "# no-can=1  - отключить приём CAN-данных (обязательно на Windows)\n";
+        file << "# no-can=1  - отключить приём CAN-данных (по умолчанию на Windows)\n";
+        file << "# forced-can=1 - принудительно включить приём CAN-данных\n";
         file << "no-can=1\n\n";
         file << "# 2. Углы просмотра для кнопки \"AUTO PERSPECTIVE\" (в градусах)\n";
         file << "auto-perspective-heading=" << autoPerspHeading_ << "\n";
@@ -1296,14 +1297,22 @@ struct ProgramOptions {
     std::string modelPath;
     std::string sensorCsvPath;
     std::string canInterface = "can0";
-    bool canEnabled = true;
+#ifdef _WIN32
+    bool canEnabled = false;  // Windows: CAN выключен по умолчанию
+#else
+    bool canEnabled = true;   // Linux: CAN включен по умолчанию
+#endif
+    bool forcedCanRequested = false;
 };
 
 ProgramOptions parseArguments(int argc, char* argv[]) {
     ProgramOptions options;
     for (int index = 1; index < argc; ++index) {
         const std::string argument = argv[index];
-        if (argument == "--no-can") {
+        if (argument == "--forced-can") {
+            options.canEnabled = true;
+            options.forcedCanRequested = true;
+        } else if (argument == "--no-can") {
             options.canEnabled = false;
         } else if (argument == "--can-interface") {
             if (index + 1 >= argc) {
@@ -1330,6 +1339,33 @@ ProgramOptions parseArguments(int argc, char* argv[]) {
 
 }  // namespace
 
+// Читает флаг forced-can из config.txt (корень проекта).
+// Возвращает true, если в файле есть forced-can=1.
+bool readForcedCanFromConfig() {
+    const fs::path configPath = getProjectRootDir() / "config.txt";
+    std::ifstream file(configPath);
+    if (!file) {
+        return false;
+    }
+    std::string line;
+    while (std::getline(file, line)) {
+        const auto trimmed = trim(line);
+        if (trimmed.empty() || trimmed[0] == '#') {
+            continue;
+        }
+        const auto eqPos = trimmed.find('=');
+        if (eqPos == std::string::npos) {
+            continue;
+        }
+        const std::string key = trimmed.substr(0, eqPos);
+        const std::string value = trimmed.substr(eqPos + 1);
+        if (key == "forced-can" && value == "1") {
+            return true;
+        }
+    }
+    return false;
+}
+
 int main(int argc, char* argv[]) {
     ProgramOptions options;
     try {
@@ -1337,8 +1373,14 @@ int main(int argc, char* argv[]) {
     } catch (const std::exception& error) {
         std::cerr << "Error: " << error.what() << '\n'
                   << "Usage: bga_visualizer [model.stl] [sensors.csv] "
-                     "[--can-interface NAME] [--no-can]\n";
+                     "[--can-interface NAME] [--no-can] [--forced-can]\n";
         return 2;
+    }
+
+    // На Windows CAN выключен по умолчанию. Включаем, если запрошено
+    // через --forced-can или forced-can=1 в config.txt.
+    if (options.forcedCanRequested || readForcedCanFromConfig()) {
+        options.canEnabled = true;
     }
 
     SDL_SetMainReady();
@@ -1407,7 +1449,7 @@ int main(int argc, char* argv[]) {
                           << ".\n";
             }
         } else {
-            std::cout << "CAN reception disabled (--no-can).\n";
+            std::cout << "CAN reception disabled.\n";
         }
 
         Viewer viewer(std::move(mesh), sensorState);

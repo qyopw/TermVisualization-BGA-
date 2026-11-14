@@ -151,7 +151,7 @@ brew install cmake sdl2
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
-./build/bga_visualizer --no-can
+./build/bga_visualizer
 ```
 
 ## Разработка на Windows (Visual Studio Code)
@@ -190,8 +190,22 @@ cmake --build build --config Release
 
 ### Запуск приложения
 
-Запустите собранный исполняемый файл с отключённым CAN-приёмом (SocketCAN доступен
-только в Linux-сборке):
+На Windows CAN-приём выключен по умолчанию (SocketCAN доступен только в Linux).
+Запуск без CAN:
+
+```powershell
+.\build\Release\bga_visualizer.exe
+```
+
+Для принудительного включения CAN используйте `--forced-can` в командной строке
+или `forced-can=1` в файле `config.txt`:
+
+```powershell
+.\build\Release\bga_visualizer.exe --forced-can
+```
+
+Явное выключение CAN через `--no-can` (избыточно на Windows, так как выключен по
+умолчанию, но доступен для ясности):
 
 ```powershell
 .\build\Release\bga_visualizer.exe --no-can
