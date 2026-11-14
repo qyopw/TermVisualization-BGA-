@@ -331,7 +331,7 @@ std::vector<Sensor> loadSensors(std::istream& input, const std::string& source,
     for (std::size_t i = 0; i < headers.size(); ++i) {
         columns[lowercase(trim(headers[i]))] = i;
     }
-    const bool hasGroupColumn = columns.find("group") != columns.end();
+    const bool hasKernelColumn = columns.find("kernel") != columns.end();
 
     for (const std::string required : {"id", "x", "y", "z"}) {
         if (columns.find(required) == columns.end()) {
@@ -396,8 +396,8 @@ std::vector<Sensor> loadSensors(std::istream& input, const std::string& source,
         }
 
         int group = -1;
-        if (hasGroupColumn) {
-            group = static_cast<int>(parseNumber(field("group"), "group", id));
+        if (hasKernelColumn) {
+            group = static_cast<int>(parseNumber(field("kernel"), "kernel", id));
         }
         sensors.push_back({id, point * scale, group});
     }
@@ -812,12 +812,12 @@ private:
         fillRect(kPanelX, 0, 1, kHeight, border);
         drawText("BGA VIEWER", kPanelX + 20, 16, text, 2);
 
-        // Collapse all button at the top of the list.
-        collapseAllButton_ = {kPanelX + 20, 42, 100, 18};
+        // Collapse all kernels button at the top of the list.
+        collapseAllButton_ = {kPanelX + 20, 42, 170, 18};
         const Pixel buttonColor = rgb(58, 72, 90);
         fillRect(collapseAllButton_.x, collapseAllButton_.y,
                  collapseAllButton_.w, collapseAllButton_.h, buttonColor);
-        drawText("COLLAPSE ALL", collapseAllButton_.x + 6,
+        drawText("COLLAPSE ALL KERNELS", collapseAllButton_.x + 6,
                  collapseAllButton_.y + 4, text);
 
         fillRect(kPanelX + 14, 66, kPanelWidth - 28, 1, border);
@@ -882,7 +882,7 @@ private:
             }
             if (entry.isGroup) {
                 const char arrow = groupExpanded_[entry.groupId] ? '+' : '-';
-                drawText(std::string(1, arrow) + " Group " +
+                drawText(std::string(1, arrow) + " Kernel " +
                              std::to_string(entry.groupId),
                          kPanelX + 20, y + 5, text);
             } else {
@@ -917,8 +917,8 @@ private:
         fillRect(0, kBottomPanelY, kPanelX, kBottomPanelHeight, panel);
         fillRect(0, kBottomPanelY, kPanelX, 1, border);
 
-        // GRouPS label.
-        drawText("GRouPS", 10, kGroupLabelY, muted);
+        // KERNEL label.
+        drawText("KERNEL", 10, kGroupLabelY, muted);
 
         // Group visibility checkboxes: 7 columns x 5 rows (35 groups).
         groupCheckboxes_.clear();
