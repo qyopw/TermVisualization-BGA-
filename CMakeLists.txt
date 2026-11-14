@@ -52,6 +52,40 @@ else()
     endif()
 endif()
 
+# OpenGL ES 2.0 for hardware-accelerated 3D rendering.
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    find_package(OpenGL QUIET)
+    if(OPENGL_FOUND)
+        set(BGA_GL_TARGET OpenGL::GL)
+    else()
+        # Fallback: try to find OpenGL32.lib directly
+        find_library(OPENGL32_LIB NAMES opengl32)
+        if(OPENGL32_LIB)
+            add_library(OpenGL::GL IMPORTED)
+            set_target_properties(OpenGL::GL PROPERTIES IMPORTED_LOCATION "${OPENGL32_LIB}")
+            set(BGA_GL_TARGET OpenGL::GL)
+        else()
+            message(FATAL_ERROR "OpenGL not found. Install OpenGL development files.")
+        endif()
+    endif()
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    find_package(OpenGLES QUIET)
+    if(OPENGLES_FOUND)
+        set(BGA_GL_TARGET OpenGLES::GLES)
+    else()
+        message(FATAL_ERROR "OpenGL ES 2.0 not found. Install libgles2-dev.")
+    endif()
+elseif(APPLE)
+    find_library(OPENGL_LIBRARY OpenGL)
+    if(OPENGL_LIBRARY)
+        add_library(OpenGL::GL IMPORTED)
+        set_target_properties(OpenGL::GL PROPERTIES IMPORTED_LOCATION "${OPENGL_LIBRARY}")
+        set(BGA_GL_TARGET OpenGL::GL)
+    else()
+        message(FATAL_ERROR "OpenGL not found.")
+    endif()
+endif()
+
 add_executable(bga_visualizer
     src/main.cpp
     src/sensor_state.cpp
@@ -59,7 +93,7 @@ add_executable(bga_visualizer
     src/can_receiver.cpp
 )
 target_include_directories(bga_visualizer PRIVATE "${PROJECT_BINARY_DIR}/generated")
-target_link_libraries(bga_visualizer PRIVATE ${BGA_SDL_TARGET} Threads::Threads)
+target_link_libraries(bga_visualizer PRIVATE ${BGA_SDL_TARGET} Threads::Threads ${BGA_GL_TARGET})
 
 # SocketCAN is a Linux kernel API. Keep it out of non-Linux builds so the
 # visualizer remains usable there in --no-can mode.

@@ -1,6 +1,47 @@
 #define SDL_MAIN_HANDLED
 #include <SDL.h>
+#include <SDL_opengl.h>
 #include "embedded_assets.h"
+
+// OpenGL ES 2.0 function pointers (loaded via SDL_GL_GetProcAddress on Windows).
+PFNGLCREATESHADERPROC pglCreateShader = nullptr;
+PFNGLSHADERSOURCEPROC pglShaderSource = nullptr;
+PFNGLCOMPILESHADERPROC pglCompileShader = nullptr;
+PFNGLGETSHADERIVPROC pglGetShaderiv = nullptr;
+PFNGLGETSHADERINFOLOGPROC pglGetShaderInfoLog = nullptr;
+PFNGLCREATEPROGRAMPROC pglCreateProgram = nullptr;
+PFNGLATTACHSHADERPROC pglAttachShader = nullptr;
+PFNGLLINKPROGRAMPROC pglLinkProgram = nullptr;
+PFNGLGETPROGRAMIVPROC pglGetProgramiv = nullptr;
+PFNGLGETPROGRAMINFOLOGPROC pglGetProgramInfoLog = nullptr;
+PFNGLUSEPROGRAMPROC pglUseProgram = nullptr;
+PFNGLDELETEPROGRAMPROC pglDeleteProgram = nullptr;
+PFNGLDELETESHADERPROC pglDeleteShader = nullptr;
+PFNGLGETUNIFORMLOCATIONPROC pglGetUniformLocation = nullptr;
+PFNGLUNIFORMMATRIX4FVPROC pglUniformMatrix4fv = nullptr;
+PFNGLUNIFORM3FPROC pglUniform3f = nullptr;
+PFNGLUNIFORM1FPROC pglUniform1f = nullptr;
+PFNGLUNIFORMMATRIX3FVPROC pglUniformMatrix3fv = nullptr;
+PFNGLGENBUFFERSPROC pglGenBuffers = nullptr;
+PFNGLBINDBUFFERPROC pglBindBuffer = nullptr;
+PFNGLBUFFERDATAPROC pglBufferData = nullptr;
+PFNGLBUFFERSUBDATAPROC pglBufferSubData = nullptr;
+PFNGLGENVERTEXARRAYSPROC pglGenVertexArrays = nullptr;
+PFNGLBINDVERTEXARRAYPROC pglBindVertexArray = nullptr;
+PFNGLENABLEVERTEXATTRIBARRAYPROC pglEnableVertexAttribArray = nullptr;
+PFNGLVERTEXATTRIBPOINTERPROC pglVertexAttribPointer = nullptr;
+PFNGLDRAWELEMENTSPROC pglDrawElements = nullptr;
+PFNGLDRAWARRAYSPROC pglDrawArrays = nullptr;
+PFNGLDISABLEVERTEXATTRIBARRAYPROC pglDisableVertexAttribArray = nullptr;
+PFNGLDELETEBUFFERSPROC pglDeleteBuffers = nullptr;
+PFNGLGETERRORPROC pglGetError = nullptr;
+PFNGLGETSTRINGPROC pglGetString = nullptr;
+PFNGLENABLEPROC pglEnable = nullptr;
+PFNGLDEPTHFUNCPROC pglDepthFunc = nullptr;
+PFNGLBLENDFUNCPROC pglBlendFunc = nullptr;
+PFNGLCLEARCOLORPROC pglClearColor = nullptr;
+PFNGLCLEARPROC pglClear = nullptr;
+PFNGLVIEWPORTPROC pglViewport = nullptr;
 #include "can_receiver.hpp"
 #include "sensor_state.hpp"
 
@@ -54,6 +95,223 @@ inline fs::path getProjectRootDir() {
     dir = dir.parent_path();  // build/
     dir = dir.parent_path();  // project root
     return dir;
+}
+
+// Forward declarations for vector math functions (defined later).
+Vec3 cross(Vec3 a, Vec3 b);
+double dot(Vec3 a, Vec3 b);
+Vec3 normalized(Vec3 value);
+
+// ---------------------------------------------------------------------------
+// Minimal 4x4 matrix math for OpenGL ES 2.0 (no external deps).
+// ---------------------------------------------------------------------------
+struct Mat4 {
+    float m[16];  // column-major
+
+    static Mat4 identity() {
+        Mat4 r{};
+        r.m[0] = 1.0f; r.m[5] = 1.0f; r.m[10] = 1.0f; r.m[15] = 1.0f;
+        return r;
+    }
+
+    static Mat4 perspective(float fovY, float aspect, float nearZ, float farZ) {
+        Mat4 r{};
+        const float f = 1.0f / std::tan(fovY * 0.5f);
+        const float nf = 1.0f / (nearZ - farZ);
+        r.m[0] = f / aspect;
+        r.m[5] = f;
+        r.m[10] = (farZ + nearZ) * nf;
+        r.m[11] = -1.0f;
+        r.m[14] = (2.0f * farZ * nearZ) * nf;
+        return r;
+    }
+
+    static Mat4 lookAt(const Vec3& eye, const Vec3& center, const Vec3& up) {
+        const Vec3 f = normalized(center - eye);
+        const Vec3 s = normalized(cross(f, up));
+        const Vec3 u = cross(s, f);
+        Mat4 r = identity();
+        r.m[0] = s.x; r.m[4] = u.x; r.m[8] = -f.x;
+        r.m[1] = s.y; r.m[5] = u.y; r.m[9] = -f.y;
+        r.m[2] = s.z; r.m[6] = u.z; r.m[10] = -f.z;
+        r.m[12] = static_cast<float>(-dot(s, eye));
+        r.m[13] = static_cast<float>(-dot(u, eye));
+        r.m[14] = static_cast<float>(dot(f, eye));
+        return r;
+    }
+
+    static Mat4 multiply(const Mat4& a, const Mat4& b) {
+        Mat4 r{};
+        for (int col = 0; col < 4; ++col) {
+            for (int row = 0; row < 4; ++row) {
+                float sum = 0.0f;
+                for (int k = 0; k < 4; ++k) {
+                    sum += a.m[k * 4 + row] * b.m[col * 4 + k];
+                }
+                r.m[col * 4 + row] = sum;
+            }
+        }
+        return r;
+    }
+};
+
+// ---------------------------------------------------------------------------
+// OpenGL ES 2.0 shader sources (embedded to avoid external file dependencies).
+// ---------------------------------------------------------------------------
+static const char* kModelVert =
+"#version 100\n"
+"precision mediump float;\n"
+"attribute vec3 a_position;\n"
+"attribute vec3 a_normal;\n"
+"uniform mat4 u_mvpMatrix;\n"
+"uniform mat4 u_modelViewMatrix;\n"
+"uniform mat3 u_normalMatrix;\n"
+"varying vec3 v_normal;\n"
+"void main() {\n"
+"    vec4 posView = u_modelViewMatrix * vec4(a_position, 1.0);\n"
+"    gl_Position = u_mvpMatrix * vec4(a_position, 1.0);\n"
+"    v_normal = u_normalMatrix * a_normal;\n"
+"}\n";
+
+static const char* kModelFrag =
+"#version 100\n"
+"precision mediump float;\n"
+"uniform vec3 u_lightDir;\n"
+"uniform float u_transparency;\n"
+"varying vec3 v_normal;\n"
+"void main() {\n"
+"    vec3 N = normalize(v_normal);\n"
+"    vec3 L = normalize(u_lightDir);\n"
+"    float brightness = 0.38 + 0.62 * abs(dot(N, L));\n"
+"    vec3 color = vec3(0.604, 0.694, 0.792) * brightness;\n"
+"    gl_FragColor = vec4(color, 1.0 - u_transparency);\n"
+"}\n";
+
+static const char* kSensorVert =
+"#version 100\n"
+"precision mediump float;\n"
+"attribute vec3 a_position;\n"
+"attribute float a_temperature;\n"
+"uniform mat4 u_mvpMatrix;\n"
+"varying float v_temperature;\n"
+"void main() {\n"
+"    gl_Position = u_mvpMatrix * vec4(a_position, 1.0);\n"
+"    v_temperature = a_temperature;\n"
+"}\n";
+
+static const char* kSensorFrag =
+"#version 100\n"
+"precision mediump float;\n"
+"varying float v_temperature;\n"
+"void main() {\n"
+"    float amount = clamp((v_temperature - 20.0) / 60.0, 0.0, 1.0);\n"
+"    vec3 color;\n"
+"    if (amount < 0.5) {\n"
+"        float fraction = amount * 2.0;\n"
+"        color = vec3(0.0, fraction, 1.0 - fraction);\n"
+"    } else {\n"
+"        float fraction = (amount - 0.5) * 2.0;\n"
+"        color = vec3(fraction, 1.0 - fraction, 0.0);\n"
+"    }\n"
+"    gl_FragColor = vec4(color, 1.0);\n"
+"}\n";
+
+static const char* kUiVert =
+"#version 100\n"
+"precision mediump float;\n"
+"attribute vec2 a_position;\n"
+"uniform mat4 u_mvpMatrix;\n"
+"uniform vec4 u_color;\n"
+"void main() {\n"
+"    gl_Position = u_mvpMatrix * vec4(a_position, 0.0, 1.0);\n"
+"}\n";
+
+static const char* kUiFrag =
+"#version 100\n"
+"precision mediump float;\n"
+"uniform vec4 u_color;\n"
+"void main() {\n"
+"    gl_FragColor = u_color;\n"
+"}\n";
+
+// ---------------------------------------------------------------------------
+// OpenGL ES 2.0 helper functions.
+// ---------------------------------------------------------------------------
+static GLuint compileShader(GLenum type, const char* source) {
+    GLuint shader = pglCreateShader(type);
+    pglShaderSource(shader, 1, &source, nullptr);
+    pglCompileShader(shader);
+    GLint ok = 0;
+    pglGetShaderiv(shader, GL_COMPILE_STATUS, &ok);
+    if (!ok) {
+        char log[1024];
+        pglGetShaderInfoLog(shader, sizeof(log), nullptr, log);
+        throw std::runtime_error(std::string("Shader compile error: ") + log);
+    }
+    return shader;
+}
+
+static GLuint linkProgram(GLuint vert, GLuint frag) {
+    GLuint prog = pglCreateProgram();
+    pglAttachShader(prog, vert);
+    pglAttachShader(prog, frag);
+    pglLinkProgram(prog);
+    GLint ok = 0;
+    pglGetProgramiv(prog, GL_LINK_STATUS, &ok);
+    if (!ok) {
+        char log[1024];
+        pglGetProgramInfoLog(prog, sizeof(log), nullptr, log);
+        throw std::runtime_error(std::string("Program link error: ") + log);
+    }
+    return prog;
+}
+
+static void loadOpenGLFunctions() {
+    pglCreateShader = (PFNGLCREATESHADERPROC)SDL_GL_GetProcAddress("glCreateShader");
+    pglShaderSource = (PFNGLSHADERSOURCEPROC)SDL_GL_GetProcAddress("glShaderSource");
+    pglCompileShader = (PFNGLCOMPILESHADERPROC)SDL_GL_GetProcAddress("glCompileShader");
+    pglGetShaderiv = (PFNGLGETSHADERIVPROC)SDL_GL_GetProcAddress("glGetShaderiv");
+    pglGetShaderInfoLog = (PFNGLGETSHADERINFOLOGPROC)SDL_GL_GetProcAddress("glGetShaderInfoLog");
+    pglCreateProgram = (PFNGLCREATEPROGRAMPROC)SDL_GL_GetProcAddress("glCreateProgram");
+    pglAttachShader = (PFNGLATTACHSHADERPROC)SDL_GL_GetProcAddress("glAttachShader");
+    pglLinkProgram = (PFNGLLINKPROGRAMPROC)SDL_GL_GetProcAddress("glLinkProgram");
+    pglGetProgramiv = (PFNGLGETPROGRAMIVPROC)SDL_GL_GetProcAddress("glGetProgramiv");
+    pglGetProgramInfoLog = (PFNGLGETPROGRAMINFOLOGPROC)SDL_GL_GetProcAddress("glGetProgramInfoLog");
+    pglUseProgram = (PFNGLUSEPROGRAMPROC)SDL_GL_GetProcAddress("glUseProgram");
+    pglDeleteProgram = (PFNGLDELETEPROGRAMPROC)SDL_GL_GetProcAddress("glDeleteProgram");
+    pglDeleteShader = (PFNGLDELETESHADERPROC)SDL_GL_GetProcAddress("glDeleteShader");
+    pglGetUniformLocation = (PFNGLGETUNIFORMLOCATIONPROC)SDL_GL_GetProcAddress("glGetUniformLocation");
+    pglUniformMatrix4fv = (PFNGLUNIFORMMATRIX4FVPROC)SDL_GL_GetProcAddress("glUniformMatrix4fv");
+    pglUniform3f = (PFNGLUNIFORM3FPROC)SDL_GL_GetProcAddress("glUniform3f");
+    pglUniform1f = (PFNGLUNIFORM1FPROC)SDL_GL_GetProcAddress("glUniform1f");
+    pglUniformMatrix3fv = (PFNGLUNIFORMMATRIX3FVPROC)SDL_GL_GetProcAddress("glUniformMatrix3fv");
+    pglGenBuffers = (PFNGLGENBUFFERSPROC)SDL_GL_GetProcAddress("glGenBuffers");
+    pglBindBuffer = (PFNGLBINDBUFFERPROC)SDL_GL_GetProcAddress("glBindBuffer");
+    pglBufferData = (PFNGLBUFFERDATAPROC)SDL_GL_GetProcAddress("glBufferData");
+    pglBufferSubData = (PFNGLBUFFERSUBDATAPROC)SDL_GL_GetProcAddress("glBufferSubData");
+    pglGenVertexArrays = (PFNGLGENVERTEXARRAYSPROC)SDL_GL_GetProcAddress("glGenVertexArrays");
+    pglBindVertexArray = (PFNGLBINDVERTEXARRAYPROC)SDL_GL_GetProcAddress("glBindVertexArray");
+    pglEnableVertexAttribArray = (PFNGLENABLEVERTEXATTRIBARRAYPROC)SDL_GL_GetProcAddress("glEnableVertexAttribArray");
+    pglVertexAttribPointer = (PFNGLVERTEXATTRIBPOINTERPROC)SDL_GL_GetProcAddress("glVertexAttribPointer");
+    pglDrawElements = (PFNGLDRAWELEMENTSPROC)SDL_GL_GetProcAddress("glDrawElements");
+    pglDrawArrays = (PFNGLDRAWARRAYSPROC)SDL_GL_GetProcAddress("glDrawArrays");
+    pglDisableVertexAttribArray = (PFNGLDISABLEVERTEXATTRIBARRAYPROC)SDL_GL_GetProcAddress("glDisableVertexAttribArray");
+    pglDeleteBuffers = (PFNGLDELETEBUFFERSPROC)SDL_GL_GetProcAddress("glDeleteBuffers");
+    pglGetError = (PFNGLGETERRORPROC)SDL_GL_GetProcAddress("glGetError");
+    pglGetString = (PFNGLGETSTRINGPROC)SDL_GL_GetProcAddress("glGetString");
+    pglEnable = (PFNGLENABLEPROC)SDL_GL_GetProcAddress("glEnable");
+    pglDepthFunc = (PFNGLDEPTHFUNCPROC)SDL_GL_GetProcAddress("glDepthFunc");
+    pglBlendFunc = (PFNGLBLENDFUNCPROC)SDL_GL_GetProcAddress("glBlendFunc");
+    pglClearColor = (PFNGLCLEARCOLORPROC)SDL_GL_GetProcAddress("glClearColor");
+    pglClear = (PFNGLCLEARPROC)SDL_GL_GetProcAddress("glClear");
+    pglViewport = (PFNGLVIEWPORTPROC)SDL_GL_GetProcAddress("glViewport");
+}
+
+static void checkGLError(const char* op) {
+    for (GLenum err = glGetError(); err != GL_NO_ERROR; err = glGetError()) {
+        std::cerr << "OpenGL error after " << op << ": 0x" << std::hex << err
+                  << std::dec << std::endl;
+    }
 }
 
 namespace {
@@ -457,39 +715,80 @@ class Viewer {
 public:
     Viewer(Mesh mesh, SensorState& sensors)
         : mesh_(std::move(mesh)), sensors_(sensors),
-          pixels_(static_cast<std::size_t>(kWidth) * kHeight),
-          depthBuffer_(static_cast<std::size_t>(kWidth) * kHeight,
-                       std::numeric_limits<double>::infinity()) {
+          modelVBO_(0), modelIBO_(0), modelIndexCount_(0),
+          modelProgram_(0), sensorProgram_(0), uiProgram_(0),
+          vaoModel_(0), vaoSensor_(0), vaoUi_(0),
+          uModelMvp_(0), uModelMV_(0), uModelNormal_(0),
+          uModelLight_(0), uModelTransp_(0),
+          uSensorMvp_(0),
+          uUiMvp_(0), uUiColor_(0) {
         groupVisible_.fill(true);
         groupExpanded_.fill(true);
         loadConfig();
+
         window_ = SDL_CreateWindow(
             "BGA Temperature Visualizer", SDL_WINDOWPOS_CENTERED,
             SDL_WINDOWPOS_CENTERED, kWidth, kHeight,
-            SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
+            SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
         if (window_ == nullptr) {
             throw std::runtime_error(std::string("SDL window error: ") + SDL_GetError());
         }
 
-        renderer_ = SDL_CreateRenderer(window_, -1, SDL_RENDERER_SOFTWARE);
-        if (renderer_ == nullptr) {
-            throw std::runtime_error(std::string("SDL renderer error: ") + SDL_GetError());
-        }
-        if (SDL_RenderSetLogicalSize(renderer_, kWidth, kHeight) != 0) {
-            throw std::runtime_error(std::string("SDL logical size error: ") + SDL_GetError());
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+#ifdef __APPLE__
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+#endif
+        glContext_ = SDL_GL_CreateContext(window_);
+        if (glContext_ == nullptr) {
+            throw std::runtime_error(std::string("OpenGL context error: ") + SDL_GetError());
         }
 
-        texture_ = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_ARGB8888,
-                                     SDL_TEXTUREACCESS_STREAMING, kWidth, kHeight);
-        if (texture_ == nullptr) {
-            throw std::runtime_error(std::string("SDL texture error: ") + SDL_GetError());
-        }
-        SDL_SetTextureBlendMode(texture_, SDL_BLENDMODE_NONE);
+        // Compile shaders and link programs.
+        GLuint modelVert = compileShader(GL_VERTEX_SHADER, kModelVert);
+        GLuint modelFrag = compileShader(GL_FRAGMENT_SHADER, kModelFrag);
+        modelProgram_ = linkProgram(modelVert, modelFrag);
+        glDeleteShader(modelVert);
+        glDeleteShader(modelFrag);
+
+        GLuint sensorVert = compileShader(GL_VERTEX_SHADER, kSensorVert);
+        GLuint sensorFrag = compileShader(GL_FRAGMENT_SHADER, kSensorFrag);
+        sensorProgram_ = linkProgram(sensorVert, sensorFrag);
+        glDeleteShader(sensorVert);
+        glDeleteShader(sensorFrag);
+
+        GLuint uiVert = compileShader(GL_VERTEX_SHADER, kUiVert);
+        GLuint uiFrag = compileShader(GL_FRAGMENT_SHADER, kUiFrag);
+        uiProgram_ = linkProgram(uiVert, uiFrag);
+        glDeleteShader(uiVert);
+        glDeleteShader(uiFrag);
+
+        // Query uniform/attribute locations.
+        uModelMvp_ = glGetUniformLocation(modelProgram_, "u_mvpMatrix");
+        uModelMV_ = glGetUniformLocation(modelProgram_, "u_modelViewMatrix");
+        uModelNormal_ = glGetUniformLocation(modelProgram_, "u_normalMatrix");
+        uModelLight_ = glGetUniformLocation(modelProgram_, "u_lightDir");
+        uModelTransp_ = glGetUniformLocation(modelProgram_, "u_transparency");
+
+        uSensorMvp_ = glGetUniformLocation(sensorProgram_, "u_mvpMatrix");
+
+        uUiMvp_ = glGetUniformLocation(uiProgram_, "u_mvpMatrix");
+        uUiColor_ = glGetUniformLocation(uiProgram_, "u_color");
+
+        // Upload model geometry to GPU.
+        uploadModelGeometry();
+
+        // Enable OpenGL states.
+        glEnable(GL_DEPTH_TEST);
+        glDepthFunc(GL_LESS);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        checkGLError("init");
     }
 
+public:
     ~Viewer() {
-        if (texture_ != nullptr) SDL_DestroyTexture(texture_);
-        if (renderer_ != nullptr) SDL_DestroyRenderer(renderer_);
+        if (glContext_ != nullptr) SDL_GL_DeleteContext(glContext_);
         if (window_ != nullptr) SDL_DestroyWindow(window_);
         SDL_Quit();
     }
@@ -502,6 +801,7 @@ public:
                 running = handleEvent(event) && running;
             }
             drawFrame();
+            SDL_GL_SwapWindow(window_);
             SDL_Delay(16);
         }
         saveConfig();
@@ -510,12 +810,9 @@ public:
 
 private:
     SDL_Window* window_ = nullptr;
-    SDL_Renderer* renderer_ = nullptr;
-    SDL_Texture* texture_ = nullptr;
     Mesh mesh_;
     SensorState& sensors_;
-    std::vector<Pixel> pixels_;
-    std::vector<double> depthBuffer_;
+
     double heading_ = 35.0;
     double pitch_ = 20.0;
     double distance_ = 18.0;
@@ -537,6 +834,26 @@ private:
     SDL_Rect bottomModelSlider_{};
     SDL_Rect bottomZOffsetSlider_{};
     SDL_Rect autoPerspButton_{};
+
+    // OpenGL ES 2.0 resources.
+    SDL_GLContext glContext_ = nullptr;
+    GLuint modelVBO_ = 0;
+    GLuint modelIBO_ = 0;
+    GLuint modelIndexCount_ = 0;
+    GLuint modelProgram_ = 0;
+    GLuint sensorProgram_ = 0;
+    GLuint uiProgram_ = 0;
+    GLuint vaoModel_ = 0;
+    GLuint vaoSensor_ = 0;
+    GLuint vaoUi_ = 0;
+    GLint uModelMvp_ = 0;
+    GLint uModelMV_ = 0;
+    GLint uModelNormal_ = 0;
+    GLint uModelLight_ = 0;
+    GLint uModelTransp_ = 0;
+    GLint uSensorMvp_ = 0;
+    GLint uUiMvp_ = 0;
+    GLint uUiColor_ = 0;
 
     struct DisplayEntry {
         bool isGroup = false;
@@ -880,71 +1197,223 @@ private:
                    static_cast<int>(255 * (1.0 - fraction)), 0);
     }
 
-    void drawModel() {
-        std::fill(depthBuffer_.begin(), depthBuffer_.end(),
-                  std::numeric_limits<double>::infinity());
-        struct ProjectedTriangle {
-            std::array<ViewPoint, 3> points;
-            double averageDepth;
-            Pixel color;
+    // Upload STL geometry to GPU (VBO/IBO).
+    void uploadModelGeometry() {
+        std::vector<float> vertices;
+        std::vector<float> normals;
+        std::vector<uint16_t> indices;
+
+        for (const Triangle& tri : mesh_.triangles) {
+            indices.push_back(static_cast<uint16_t>(vertices.size() / 3));
+            vertices.push_back(static_cast<float>(tri.a.x));
+            vertices.push_back(static_cast<float>(tri.a.y));
+            vertices.push_back(static_cast<float>(tri.a.z));
+            normals.push_back(static_cast<float>(tri.normal.x));
+            normals.push_back(static_cast<float>(tri.normal.y));
+            normals.push_back(static_cast<float>(tri.normal.z));
+
+            indices.push_back(static_cast<uint16_t>(vertices.size() / 3));
+            vertices.push_back(static_cast<float>(tri.b.x));
+            vertices.push_back(static_cast<float>(tri.b.y));
+            vertices.push_back(static_cast<float>(tri.b.z));
+            normals.push_back(static_cast<float>(tri.normal.x));
+            normals.push_back(static_cast<float>(tri.normal.y));
+            normals.push_back(static_cast<float>(tri.normal.z));
+
+            indices.push_back(static_cast<uint16_t>(vertices.size() / 3));
+            vertices.push_back(static_cast<float>(tri.c.x));
+            vertices.push_back(static_cast<float>(tri.c.y));
+            vertices.push_back(static_cast<float>(tri.c.z));
+            normals.push_back(static_cast<float>(tri.normal.x));
+            normals.push_back(static_cast<float>(tri.normal.y));
+            normals.push_back(static_cast<float>(tri.normal.z));
+        }
+
+        modelIndexCount_ = static_cast<GLsizei>(indices.size());
+
+        glGenBuffers(1, &modelVBO_);
+        glBindBuffer(GL_ARRAY_BUFFER, modelVBO_);
+        glBufferData(GL_ARRAY_BUFFER,
+                     vertices.size() * sizeof(float) +
+                         normals.size() * sizeof(float),
+                     nullptr, GL_STATIC_DRAW);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, vertices.size() * sizeof(float),
+                        vertices.data());
+        glBufferSubData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float),
+                        normals.size() * sizeof(float), normals.data());
+
+        glGenBuffers(1, &modelIBO_);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, modelIBO_);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER,
+                     indices.size() * sizeof(uint16_t), indices.data(),
+                     GL_STATIC_DRAW);
+
+        glGenVertexArrays(1, &vaoModel_);
+        glBindVertexArray(vaoModel_);
+        glBindBuffer(GL_ARRAY_BUFFER, modelVBO_);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, modelIBO_);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 0,
+                              reinterpret_cast<void*>(
+                                  vertices.size() * sizeof(float)));
+        glBindVertexArray(0);
+        checkGLError("uploadModelGeometry");
+    }
+
+    // Compute model-view-projection matrix for current camera state.
+    Mat4 computeMVP() const {
+        Vec3 eye{0.0, 0.0, static_cast<float>(distance_)};
+        Vec3 center{0.0, 0.0, 0.0};
+        Vec3 up{0.0, 1.0, 0.0};
+
+        const float h = static_cast<float>(heading_ * 3.14159265358979323846 /
+                                           180.0);
+        const float ch = std::cos(h);
+        const float sh = std::sin(h);
+        const Vec3 rotatedEye{
+            eye.x * ch - eye.z * sh,
+            eye.y,
+            eye.x * sh + eye.z * ch,
         };
-        std::vector<ProjectedTriangle> projected;
-        projected.reserve(mesh_.triangles.size());
-        const Vec3 light = normalized({-0.35, -0.45, 0.82});
 
-        for (const Triangle& triangle : mesh_.triangles) {
-            std::array<ViewPoint, 3> points{
-                transform(triangle.a), transform(triangle.b), transform(triangle.c)};
-            if (points[0].depth <= kNearPlane && points[1].depth <= kNearPlane &&
-                points[2].depth <= kNearPlane) {
-                continue;
-            }
-            const Vec3 normal = transformDirection(triangle.normal);
-            const double brightness = 0.38 + 0.62 * std::abs(dot(normal, light));
-            const Pixel color = rgb(static_cast<int>(154 * brightness),
-                                    static_cast<int>(177 * brightness),
-                                    static_cast<int>(202 * brightness));
-            const double averageDepth =
-                (points[0].depth + points[1].depth + points[2].depth) / 3.0;
-            projected.push_back({points, averageDepth, color});
+        const float p = static_cast<float>(pitch_ * 3.14159265358979323846 /
+                                           180.0);
+        const float cp = std::cos(p);
+        const float sp = std::sin(p);
+        const Vec3 pitchedEye{
+            rotatedEye.x,
+            rotatedEye.y * cp - rotatedEye.z * sp,
+            rotatedEye.y * sp + rotatedEye.z * cp,
+        };
+
+        Mat4 view = Mat4::lookAt(pitchedEye, center, up);
+        Mat4 proj = Mat4::perspective(
+            static_cast<float>(45.0 * 3.14159265358979323846 / 180.0),
+            static_cast<float>(kWidth) / static_cast<float>(kHeight),
+            static_cast<float>(kNearPlane), 1000.0f);
+        return Mat4::multiply(proj, view);
+    }
+
+    void drawModel() {
+        if (modelProgram_ == 0 || vaoModel_ == 0) {
+            return;
         }
 
-        const bool opaque = transparency_ <= 0.001;
-        if (!opaque) {
-            std::sort(projected.begin(), projected.end(),
-                      [](const ProjectedTriangle& a, const ProjectedTriangle& b) {
-                          return a.averageDepth > b.averageDepth;
-                      });
-        }
-        const int alpha = static_cast<int>(255.0 * (1.0 - transparency_));
-        for (const ProjectedTriangle& triangle : projected) {
-            rasterTriangle(triangle.points, triangle.color, alpha, opaque);
-        }
+        Mat4 mvp = computeMVP();
+        Vec3 eye{0.0, 0.0, static_cast<float>(distance_)};
+        const float h = static_cast<float>(heading_ * 3.14159265358979323846 /
+                                           180.0);
+        const float ch = std::cos(h);
+        const float sh = std::sin(h);
+        const Vec3 rotatedEye{
+            eye.x * ch - eye.z * sh,
+            eye.y,
+            eye.x * sh + eye.z * ch,
+        };
+        const float p = static_cast<float>(pitch_ * 3.14159265358979323846 /
+                                           180.0);
+        const float cp = std::cos(p);
+        const float sp = std::sin(p);
+        const Vec3 pitchedEye{
+            rotatedEye.x,
+            rotatedEye.y * cp - rotatedEye.z * sp,
+            rotatedEye.y * sp + rotatedEye.z * cp,
+        };
+        Vec3 center{0.0, 0.0, 0.0};
+        Vec3 up{0.0, 1.0, 0.0};
+        Mat4 view = Mat4::lookAt(pitchedEye, center, up);
+
+        float nMat[9] = {
+            view.m[0], view.m[4], view.m[8],
+            view.m[1], view.m[5], view.m[9],
+            view.m[2], view.m[6], view.m[10],
+        };
+
+        glViewport(0, 0, kPanelX, kHeight);
+        glClearColor(0.098f, 0.122f, 0.161f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        glUseProgram(modelProgram_);
+        glUniformMatrix4fv(uModelMvp_, 1, GL_FALSE, mvp.m);
+        glUniformMatrix4fv(uModelMV_, 1, GL_FALSE, view.m);
+        glUniformMatrix3fv(uModelNormal_, 1, GL_FALSE, nMat);
+        glUniform3f(uModelLight_, 0.5f, 1.0f, 0.3f);
+        glUniform1f(uModelTransp_, static_cast<float>(transparency_));
+
+        glBindVertexArray(vaoModel_);
+        glDrawElements(GL_TRIANGLES, modelIndexCount_, GL_UNSIGNED_SHORT,
+                       nullptr);
+        glBindVertexArray(0);
+        glUseProgram(0);
+        checkGLError("drawModel");
     }
 
     void drawSensors(const std::vector<Sensor>& sensors) {
+        if (sensorProgram_ == 0) {
+            return;
+        }
+
+        Mat4 mvp = computeMVP();
+
+        glViewport(0, 0, kPanelX, kHeight);
+
+        glUseProgram(sensorProgram_);
+        glUniformMatrix4fv(uSensorMvp_, 1, GL_FALSE, mvp.m);
+
+        std::vector<float> sensorVerts;
+        std::vector<float> sensorTemps;
         for (const Sensor& sensor : sensors) {
             if (sensor.group >= 0 && !groupVisible_[sensor.group]) {
                 continue;
             }
-            const ViewPoint point = transform(sensor.position);
+            Vec3 pos = sensor.position;
+            pos.z += static_cast<double>(modelZOffset_);
+            ViewPoint point = transform(pos);
             if (!std::isfinite(point.x) || !std::isfinite(point.y) ||
                 point.depth <= kNearPlane || point.x < -6.0 ||
                 point.x >= kPanelX + 6.0 || point.y < -6.0 ||
                 point.y >= kHeight + 6.0) {
                 continue;
             }
-            const int x = static_cast<int>(std::lround(point.x));
-            const int y = static_cast<int>(std::lround(point.y));
-            if (x < 0 || x >= kPanelX || y < 0 || y >= kHeight) {
-                continue;
-            }
-            const Pixel markerColor = sensor.hasCurrentReading
-                ? temperatureColor(sensor.temperature)
-                : rgb(116, 132, 151);
-            fillCircle(x, y, 4, rgb(242, 246, 250));
-            fillCircle(x, y, 3, markerColor);
+            sensorVerts.push_back(static_cast<float>(point.x));
+            sensorVerts.push_back(static_cast<float>(point.y));
+            sensorVerts.push_back(static_cast<float>(point.depth));
+            sensorTemps.push_back(sensor.hasCurrentReading
+                                      ? static_cast<float>(sensor.temperature)
+                                      : 20.0f);
         }
+
+        if (sensorVerts.empty()) {
+            glUseProgram(0);
+            return;
+        }
+
+        GLuint sensorVBO = 0, sensorTBO = 0;
+        glGenBuffers(1, &sensorVBO);
+        glBindBuffer(GL_ARRAY_BUFFER, sensorVBO);
+        glBufferData(GL_ARRAY_BUFFER, sensorVerts.size() * sizeof(float),
+                     sensorVerts.data(), GL_DYNAMIC_DRAW);
+        glGenBuffers(1, &sensorTBO);
+        glBindBuffer(GL_ARRAY_BUFFER, sensorTBO);
+        glBufferData(GL_ARRAY_BUFFER, sensorTemps.size() * sizeof(float),
+                     sensorTemps.data(), GL_DYNAMIC_DRAW);
+
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(1, 1, GL_FLOAT, GL_FALSE, 0, nullptr);
+
+        glDrawArrays(GL_POINTS, 0,
+                     static_cast<GLsizei>(sensorVerts.size() / 3));
+
+        glDisableVertexAttribArray(0);
+        glDisableVertexAttribArray(1);
+        glDeleteBuffers(1, &sensorVBO);
+        glDeleteBuffers(1, &sensorTBO);
+        glUseProgram(0);
+        checkGLError("drawSensors");
     }
 
     void drawPanel(const std::vector<Sensor>& sensors) {
@@ -952,21 +1421,21 @@ private:
         const Pixel border = rgb(54, 67, 84);
         const Pixel text = rgb(225, 232, 241);
         const Pixel muted = rgb(155, 170, 188);
-        fillRect(kPanelX, 0, kPanelWidth, kHeight, panel);
-        fillRect(kPanelX, 0, 1, kHeight, border);
-        drawText("BGA VIEWER", kPanelX + 20, 16, text, 2);
+        drawRectGL(kPanelX, 0, kPanelWidth, kHeight, panel);
+        drawRectGL(kPanelX, 0, 1, kHeight, border);
+        drawTextGL("BGA VIEWER", kPanelX + 20, 16, text, 2);
 
         // Collapse all kernels button at the top of the list.
         collapseAllButton_ = {kPanelX + 20, 42, 170, 18};
         const Pixel buttonColor = rgb(58, 72, 90);
-        fillRect(collapseAllButton_.x, collapseAllButton_.y,
-                 collapseAllButton_.w, collapseAllButton_.h, buttonColor);
-        drawText("COLLAPSE ALL KERNELS", collapseAllButton_.x + 6,
-                 collapseAllButton_.y + 4, text);
+        drawRectGL(collapseAllButton_.x, collapseAllButton_.y,
+                   collapseAllButton_.w, collapseAllButton_.h, buttonColor);
+        drawTextGL("COLLAPSE ALL KERNELS", collapseAllButton_.x + 6,
+                   collapseAllButton_.y + 4, text);
 
-        fillRect(kPanelX + 14, 66, kPanelWidth - 28, 1, border);
-        drawText("ID", kPanelX + 20, 78, muted);
-        drawText("TEMP C", kPanelX + 158, 78, muted);
+        drawRectGL(kPanelX + 14, 66, kPanelWidth - 28, 1, border);
+        drawTextGL("ID", kPanelX + 20, 78, muted);
+        drawTextGL("TEMP C", kPanelX + 158, 78, muted);
         // Build flat list of display entries: group headers + sensors.
         displayEntries_.clear();
         for (int g = 0; g < 35; ++g) {
@@ -1021,34 +1490,34 @@ private:
                 displayEntries_[static_cast<std::size_t>(index)];
             const int y = tableTop + row * rowHeight;
             if (row % 2 == 0) {
-                fillRect(kPanelX + 12, y, kPanelWidth - 24, rowHeight,
-                         rgb(27, 35, 47));
+                drawRectGL(kPanelX + 12, y, kPanelWidth - 24, rowHeight,
+                           rgb(27, 35, 47));
             }
             if (entry.isGroup) {
                 const char arrow = groupExpanded_[entry.groupId] ? '+' : '-';
-                drawText(std::string(1, arrow) + " Kernel " +
-                             std::to_string(entry.groupId),
-                         kPanelX + 20, y + 5, text);
+                drawTextGL(std::string(1, arrow) + " Kernel " +
+                               std::to_string(entry.groupId),
+                           kPanelX + 20, y + 5, text);
             } else {
                 const Sensor& sensor =
                     sensors[entry.sensorIndex];
-                drawText("----" + sensor.id.substr(0, 10), kPanelX + 28,
-                         y + 5, text);
+                drawTextGL("----" + sensor.id.substr(0, 10), kPanelX + 28,
+                           y + 5, text);
                 if (sensor.hasCurrentReading) {
                     std::ostringstream temperature;
                     temperature << std::fixed << std::setprecision(1)
                                 << sensor.temperature;
-                    drawText(temperature.str(), kPanelX + 158, y + 5,
-                             temperatureColor(sensor.temperature));
+                    drawTextGL(temperature.str(), kPanelX + 158, y + 5,
+                               temperatureColor(sensor.temperature));
                 } else {
-                    drawText("N/A", kPanelX + 158, y + 5, muted);
+                    drawTextGL("N/A", kPanelX + 158, y + 5, muted);
                 }
             }
         }
-        drawText("Use PageUp/Down to Scroll", kPanelX + 20, kHeight - 24,
-                 muted);
-        drawText("sensors: " + std::to_string(sensors.size()),
-                 kPanelX + kPanelWidth - 110, kHeight - 8, muted);
+        drawTextGL("Use PageUp/Down to Scroll", kPanelX + 20, kHeight - 24,
+                   muted);
+        drawTextGL("sensors: " + std::to_string(sensors.size()),
+                   kPanelX + kPanelWidth - 110, kHeight - 8, muted);
     }
 
     void drawBottomControls(const std::vector<Sensor>& /*sensors*/) {
@@ -1058,11 +1527,11 @@ private:
         const Pixel muted = rgb(155, 170, 188);
 
         // Bottom panel background.
-        fillRect(0, kBottomPanelY, kPanelX, kBottomPanelHeight, panel);
-        fillRect(0, kBottomPanelY, kPanelX, 1, border);
+        drawRectGL(0, kBottomPanelY, kPanelX, kBottomPanelHeight, panel);
+        drawRectGL(0, kBottomPanelY, kPanelX, 1, border);
 
         // KERNEL label.
-        drawText("KERNEL", 10, kGroupLabelY, muted);
+        drawTextGL("KERNEL", 10, kGroupLabelY, muted);
 
         // Group visibility checkboxes: 7 columns x 5 rows (35 groups).
         groupCheckboxes_.clear();
@@ -1080,76 +1549,58 @@ private:
             const Pixel checkColor = groupVisible_[g]
                 ? rgb(91, 183, 240)
                 : rgb(58, 72, 90);
-            fillRect(rect.x, rect.y, rect.w, rect.h, checkColor);
-            fillRect(rect.x + 3, rect.y + 3, rect.w - 6, rect.h - 6,
-                     rgb(19, 25, 34));
-            drawText(std::to_string(g), rect.x + 5, rect.y + 3, text);
+            drawRectGL(rect.x, rect.y, rect.w, rect.h, checkColor);
+            drawRectGL(rect.x + 3, rect.y + 3, rect.w - 6, rect.h - 6,
+                       rgb(19, 25, 34));
+            drawTextGL(std::to_string(g), rect.x + 5, rect.y + 3, text);
         }
 
         // MODEL TRANSPARENCY slider.
-        drawText("MODEL TRANSPARENCY", kBottomSliderX, kModelTransparencyY,
-                 muted);
+        drawTextGL("MODEL TRANSPARENCY", kBottomSliderX, kModelTransparencyY,
+                   muted);
         const int modelPercent =
             static_cast<int>(std::lround(transparency_ * 100.0));
-        drawText(std::to_string(modelPercent) + "%",
-                 kBottomSliderX + kBottomSliderWidth + 10,
-                 kModelTransparencyY, text);
+        drawTextGL(std::to_string(modelPercent) + "%",
+                   kBottomSliderX + kBottomSliderWidth + 10,
+                   kModelTransparencyY, text);
         bottomModelSlider_ = {kBottomSliderX, kModelTransparencyY + 14,
                               kBottomSliderWidth, 12};
-        fillRect(bottomModelSlider_.x, bottomModelSlider_.y,
-                 bottomModelSlider_.w, bottomModelSlider_.h,
-                 rgb(58, 72, 90));
+        drawRectGL(bottomModelSlider_.x, bottomModelSlider_.y,
+                   bottomModelSlider_.w, bottomModelSlider_.h,
+                   rgb(58, 72, 90));
         const int modelKnobX = kBottomSliderX +
             static_cast<int>(std::lround(
                 (transparency_ / 0.95) * kBottomSliderWidth));
-        fillCircle(modelKnobX, bottomModelSlider_.y + 6, 7,
+        drawRectGL(modelKnobX - 7, bottomModelSlider_.y - 1, 14, 14,
                    rgb(91, 183, 240));
 
         // MODEL Z OFFSET slider.
-        drawText("MODEL Z OFFSET", kBottomSliderX, kModelZOffsetY, muted);
+        drawTextGL("MODEL Z OFFSET", kBottomSliderX, kModelZOffsetY, muted);
         const int zOffsetPercent =
             static_cast<int>(std::lround((modelZOffset_ + 10.0) / 20.0 * 100.0));
-        drawText(std::to_string(zOffsetPercent) + "%",
-                 kBottomSliderX + kBottomSliderWidth + 10,
-                 kModelZOffsetY, text);
+        drawTextGL(std::to_string(zOffsetPercent) + "%",
+                   kBottomSliderX + kBottomSliderWidth + 10,
+                   kModelZOffsetY, text);
         bottomZOffsetSlider_ = {kBottomSliderX, kModelZOffsetY + 14,
                                 kBottomSliderWidth, 12};
-        fillRect(bottomZOffsetSlider_.x, bottomZOffsetSlider_.y,
-                 bottomZOffsetSlider_.w, bottomZOffsetSlider_.h,
-                 rgb(58, 72, 90));
+        drawRectGL(bottomZOffsetSlider_.x, bottomZOffsetSlider_.y,
+                   bottomZOffsetSlider_.w, bottomZOffsetSlider_.h,
+                   rgb(58, 72, 90));
         const int zOffsetKnobX = kBottomSliderX +
             static_cast<int>(std::lround(
                 ((modelZOffset_ + 10.0) / 20.0) * kBottomSliderWidth));
-        fillCircle(zOffsetKnobX, bottomZOffsetSlider_.y + 6, 7,
+        drawRectGL(zOffsetKnobX - 7, bottomZOffsetSlider_.y - 1, 14, 14,
                    rgb(91, 183, 240));
     }
 
     void drawFrame() {
-        std::fill(pixels_.begin(), pixels_.end(), rgb(25, 31, 41));
         const std::vector<Sensor> sensors = sensors_.snapshot();
         drawModel();
         drawSensors(sensors);
         drawBottomControls(sensors);
         drawPanel(sensors);
         drawAutoPerspButton();
-        void* texturePixels = nullptr;
-        int pitch = 0;
-        if (SDL_LockTexture(texture_, nullptr, &texturePixels, &pitch) != 0) {
-            throw std::runtime_error(std::string("SDL texture lock error: ") +
-                                     SDL_GetError());
-        }
-        const auto* source = reinterpret_cast<const unsigned char*>(pixels_.data());
-        auto* destination = static_cast<unsigned char*>(texturePixels);
-        const std::size_t rowBytes = kWidth * sizeof(Pixel);
-        for (int row = 0; row < kHeight; ++row) {
-            std::memcpy(destination + static_cast<std::size_t>(row) * pitch,
-                        source + static_cast<std::size_t>(row) * rowBytes,
-                        rowBytes);
-        }
-        SDL_UnlockTexture(texture_);
-        SDL_RenderClear(renderer_);
-        SDL_RenderCopy(renderer_, texture_, nullptr, nullptr);
-        SDL_RenderPresent(renderer_);
+        SDL_GL_SwapWindow(window_);
     }
 
     void setTransparency(int mouseX) {
@@ -1174,13 +1625,13 @@ private:
         autoPerspButton_ = {kAutoPerspButtonX, kAutoPerspButtonY,
                             kAutoPerspButtonW, kAutoPerspButtonH};
         const Pixel buttonColor = rgb(58, 72, 90);
-        fillRect(autoPerspButton_.x, autoPerspButton_.y,
-                 autoPerspButton_.w, autoPerspButton_.h, buttonColor);
-        fillRect(autoPerspButton_.x + 2, autoPerspButton_.y + 2,
-                 autoPerspButton_.w - 4, autoPerspButton_.h - 4,
-                 rgb(19, 25, 34));
-        drawText("AUTO PERSPECTIVE", autoPerspButton_.x + 8,
-                 autoPerspButton_.y + 6, rgb(225, 232, 241));
+        drawRectGL(autoPerspButton_.x, autoPerspButton_.y,
+                   autoPerspButton_.w, autoPerspButton_.h, buttonColor);
+        drawRectGL(autoPerspButton_.x + 2, autoPerspButton_.y + 2,
+                   autoPerspButton_.w - 4, autoPerspButton_.h - 4,
+                   rgb(19, 25, 34));
+        drawTextGL("AUTO PERSPECTIVE", autoPerspButton_.x + 8,
+                   autoPerspButton_.y + 6, rgb(225, 232, 241));
     }
 
     void changeZoom(double factor) {
