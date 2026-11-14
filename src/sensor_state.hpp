@@ -11,6 +11,10 @@ struct Vec3 {
     double x = 0.0;
     double y = 0.0;
     double z = 0.0;
+
+    Vec3 operator-(const Vec3& other) const {
+        return Vec3{x - other.x, y - other.y, z - other.z};
+    }
 };
 
 struct Sensor {
