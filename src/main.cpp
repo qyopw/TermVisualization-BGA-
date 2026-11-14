@@ -26,7 +26,35 @@
 #include <utility>
 #include <vector>
 
+#ifdef _WIN32
+#define NOMINMAX
+#include <windows.h>
+#endif
+
 namespace fs = std::filesystem;
+
+// Возвращает каталог, в котором находится исполняемый файл.
+inline fs::path getExeDir() {
+#ifdef _WIN32
+    char buffer[MAX_PATH];
+    const DWORD len = GetModuleFileNameA(nullptr, buffer, MAX_PATH);
+    if (len == 0 || len == MAX_PATH) {
+        return fs::current_path();
+    }
+    return fs::path(buffer).parent_path();
+#else
+    return fs::current_path();
+#endif
+}
+
+// Возвращает корень проекта (два уровня вверх от build/Release/).
+inline fs::path getProjectRootDir() {
+    auto dir = getExeDir();
+    // build/Release/ -> build/ -> project root
+    dir = dir.parent_path();  // build/
+    dir = dir.parent_path();  // project root
+    return dir;
+}
 
 namespace {
 
@@ -53,6 +81,12 @@ constexpr int kModelTransparencyY = kBottomPanelY + 36;
 constexpr int kModelZOffsetY = kBottomPanelY + 86;
 constexpr int kBottomSliderX = 167;
 constexpr int kBottomSliderWidth = 340;
+
+// Auto-perspective button (top-left corner, on top of the viewport).
+constexpr int kAutoPerspButtonX = 10;
+constexpr int kAutoPerspButtonY = 10;
+constexpr int kAutoPerspButtonW = 110;
+constexpr int kAutoPerspButtonH = 24;
 
 using Pixel = std::uint32_t;
 
@@ -428,6 +462,7 @@ public:
                        std::numeric_limits<double>::infinity()) {
         groupVisible_.fill(true);
         groupExpanded_.fill(true);
+        loadConfig();
         window_ = SDL_CreateWindow(
             "BGA Temperature Visualizer", SDL_WINDOWPOS_CENTERED,
             SDL_WINDOWPOS_CENTERED, kWidth, kHeight,
@@ -469,6 +504,7 @@ public:
             drawFrame();
             SDL_Delay(16);
         }
+        saveConfig();
         return 0;
     }
 
@@ -483,6 +519,9 @@ private:
     double heading_ = 35.0;
     double pitch_ = 20.0;
     double distance_ = 18.0;
+    double autoPerspHeading_ = 70.0;
+    double autoPerspPitch_ = -44.5;
+    double autoPerspDistance_ = 18.0;
     double transparency_ = 0.0;
     double modelZOffset_ = 0.0;
     bool rotating_ = false;
@@ -497,6 +536,7 @@ private:
     SDL_Rect collapseAllButton_{};
     SDL_Rect bottomModelSlider_{};
     SDL_Rect bottomZOffsetSlider_{};
+    SDL_Rect autoPerspButton_{};
 
     struct DisplayEntry {
         bool isGroup = false;
@@ -527,6 +567,109 @@ private:
         }
         for (int g = 0; g < 35; ++g) {
             groupExpanded_[g] = !allExpanded;
+        }
+    }
+
+    // Загрузка конфигурации из config.txt (из корня проекта).
+    void loadConfig() {
+        const fs::path configPath = getProjectRootDir() / "config.txt";
+        std::ifstream file(configPath);
+        if (!file) {
+            return;  // Конфига нет — используем значения по умолчанию.
+        }
+        std::string line;
+        while (std::getline(file, line)) {
+            // Пропускаем пустые строки и комментарии.
+            const auto trimmed = trim(line);
+            if (trimmed.empty() || trimmed[0] == '#') {
+                continue;
+            }
+            const auto eqPos = trimmed.find('=');
+            if (eqPos == std::string::npos) {
+                continue;
+            }
+            const std::string key = trimmed.substr(0, eqPos);
+            const std::string value = trimmed.substr(eqPos + 1);
+
+            if (key == "auto-perspective-heading") {
+                autoPerspHeading_ = parseNumber(value, "auto-perspective-heading", "config");
+            } else if (key == "auto-perspective-pitch") {
+                autoPerspPitch_ = parseNumber(value, "auto-perspective-pitch", "config");
+            } else if (key == "auto-perspective-distance") {
+                autoPerspDistance_ = parseNumber(value, "auto-perspective-distance", "config");
+            } else if (key == "model-transparency") {
+                transparency_ = parseNumber(value, "model-transparency", "config");
+            } else if (key == "model-z-offset") {
+                modelZOffset_ = parseNumber(value, "model-z-offset", "config");
+            } else if (key == "disabled-kernels") {
+                parseDisabledKernels(value);
+            }
+        }
+    }
+
+    // Сохранение конфигурации в config.txt (в корень проекта) при закрытии программы.
+    void saveConfig() {
+        const fs::path configPath = getProjectRootDir() / "config.txt";
+        std::ofstream file(configPath);
+        if (!file) {
+            return;
+        }
+        file << "# Конфигурация приложения TermVisualization-BGA\n";
+        file << "# Строки, начинающиеся с #, являются комментариями.\n\n";
+        file << "# 1. Параметры запуска программы\n";
+        file << "# no-can=1  - отключить приём CAN-данных (обязательно на Windows)\n";
+        file << "no-can=1\n\n";
+        file << "# 2. Углы просмотра для кнопки \"AUTO PERSPECTIVE\" (в градусах)\n";
+        file << "auto-perspective-heading=" << autoPerspHeading_ << "\n";
+        file << "auto-perspective-pitch=" << autoPerspPitch_ << "\n";
+        file << "auto-perspective-distance=" << autoPerspDistance_ << "\n\n";
+        file << "# 3. Начальные значения ползунков (0.0 .. 0.95)\n";
+        file << "model-transparency=" << transparency_ << "\n";
+        file << "model-z-offset=" << modelZOffset_ << "\n\n";
+        file << "# 4. Список выключенных kernel (номера от 0 до 34, через запятую).\n";
+        file << "# Пустой список означает, что все kernel включены.\n";
+        file << "disabled-kernels=";
+        bool first = true;
+        for (int g = 0; g < 35; ++g) {
+            if (!groupVisible_[g]) {
+                if (!first) {
+                    file << ",";
+                }
+                file << g;
+                first = false;
+            }
+        }
+        file << "\n";
+    }
+
+private:
+    // Парсит список выключенных kernel из строки "0,3,7,14" или пустой строки.
+    void parseDisabledKernels(const std::string& value) {
+        std::string trimmed = trim(value);
+        if (trimmed.empty()) {
+            return;
+        }
+        std::size_t start = 0;
+        while (start < trimmed.size()) {
+            const auto comma = trimmed.find(',', start);
+            const std::string token =
+                (comma == std::string::npos) ? trimmed.substr(start)
+                                             : trimmed.substr(start, comma - start);
+            const auto tkn = trim(token);
+            if (!tkn.empty()) {
+                try {
+                    const int kernel = std::stoi(tkn);
+                    if (kernel >= 0 && kernel < 35) {
+                        groupVisible_[kernel] = false;
+                    }
+                } catch (...) {
+                    // Игнорируем некорректные значения.
+                }
+            }
+            if (comma == std::string::npos) {
+                break;
+            }
+            start = comma + 1;
         }
     }
 
@@ -987,6 +1130,7 @@ private:
         drawSensors(sensors);
         drawBottomControls(sensors);
         drawPanel(sensors);
+        drawAutoPerspButton();
         void* texturePixels = nullptr;
         int pitch = 0;
         if (SDL_LockTexture(texture_, nullptr, &texturePixels, &pitch) != 0) {
@@ -1017,6 +1161,25 @@ private:
         const double relative = static_cast<double>(mouseX - kBottomSliderX) /
                                 static_cast<double>(kBottomSliderWidth);
         modelZOffset_ = std::clamp(relative * 20.0 - 10.0, -10.0, 10.0);
+    }
+
+    void setAutoPerspective() {
+        heading_ = autoPerspHeading_;
+        pitch_ = autoPerspPitch_;
+        distance_ = autoPerspDistance_;
+    }
+
+    void drawAutoPerspButton() {
+        autoPerspButton_ = {kAutoPerspButtonX, kAutoPerspButtonY,
+                            kAutoPerspButtonW, kAutoPerspButtonH};
+        const Pixel buttonColor = rgb(58, 72, 90);
+        fillRect(autoPerspButton_.x, autoPerspButton_.y,
+                 autoPerspButton_.w, autoPerspButton_.h, buttonColor);
+        fillRect(autoPerspButton_.x + 2, autoPerspButton_.y + 2,
+                 autoPerspButton_.w - 4, autoPerspButton_.h - 4,
+                 rgb(19, 25, 34));
+        drawText("AUTO PERSPECTIVE", autoPerspButton_.x + 8,
+                 autoPerspButton_.y + 6, rgb(225, 232, 241));
     }
 
     void changeZoom(double factor) {
@@ -1065,6 +1228,10 @@ private:
                         break;
                     }
                 }
+            } else if (x >= kAutoPerspButtonX && x < kAutoPerspButtonX + kAutoPerspButtonW &&
+                       y >= kAutoPerspButtonY && y < kAutoPerspButtonY + kAutoPerspButtonH) {
+                // Auto-perspective button click.
+                setAutoPerspective();
             } else if (x < kPanelX) {
                 rotating_ = true;
                 lastMouseX_ = x;

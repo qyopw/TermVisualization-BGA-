@@ -1,0 +1,19 @@
+# Конфигурация приложения TermVisualization-BGA
+# Строки, начинающиеся с #, являются комментариями.
+
+# 1. Параметры запуска программы
+# no-can=1  - отключить приём CAN-данных (обязательно на Windows)
+no-can=1
+
+# 2. Углы просмотра для кнопки "AUTO PERSPECTIVE" (в градусах)
+auto-perspective-heading=70
+auto-perspective-pitch=-56
+auto-perspective-distance=14
+
+# 3. Начальные значения ползунков (0.0 .. 0.95)
+model-transparency=0.916471
+model-z-offset=1.82353
+
+# 4. Список выключенных kernel (номера от 0 до 34, через запятую).
+# Пустой список означает, что все kernel включены.
+disabled-kernels=
