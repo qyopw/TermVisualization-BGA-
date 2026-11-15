@@ -1,47 +1,94 @@
 #define SDL_MAIN_HANDLED
 #include <SDL.h>
 #include <SDL_opengl.h>
+#include <SDL_opengl_glext.h>
 #include "embedded_assets.h"
+#include "can_protocol.hpp"
+#include "can_receiver.hpp"
+#include "sensor_state.hpp"
 
 // OpenGL ES 2.0 function pointers (loaded via SDL_GL_GetProcAddress on Windows).
-extern PFNGLCREATESHADERPROC pglCreateShader;
-extern PFNGLSHADERSOURCEPROC pglShaderSource;
-extern PFNGLCOMPILESHADERPROC pglCompileShader;
-extern PFNGLGETSHADERIVPROC pglGetShaderiv;
-extern PFNGLGETSHADERINFOLOGPROC pglGetShaderInfoLog;
-extern PFNGLCREATEPROGRAMPROC pglCreateProgram;
-extern PFNGLATTACHSHADERPROC pglAttachShader;
-extern PFNGLLINKPROGRAMPROC pglLinkProgram;
-extern PFNGLGETPROGRAMIVPROC pglGetProgramiv;
-extern PFNGLGETPROGRAMINFOLOGPROC pglGetProgramInfoLog;
-extern PFNGLUSEPROGRAMPROC pglUseProgram;
-extern PFNGLDELETEPROGRAMPROC pglDeleteProgram;
-extern PFNGLDELETESHADERPROC pglDeleteShader;
-extern PFNGLGETUNIFORMLOCATIONPROC pglGetUniformLocation;
-extern PFNGLUNIFORMMATRIX4FVPROC pglUniformMatrix4fv;
-extern PFNGLUNIFORM3FPROC pglUniform3f;
-extern PFNGLUNIFORM1FPROC pglUniform1f;
-extern PFNGLUNIFORMMATRIX3FVPROC pglUniformMatrix3fv;
-extern PFNGLGENBUFFERSPROC pglGenBuffers;
-extern PFNGLBINDBUFFERPROC pglBindBuffer;
-extern PFNGLBUFFERDATAPROC pglBufferData;
-extern PFNGLBUFFERSUBDATAPROC pglBufferSubData;
-extern PFNGLGENVERTEXARRAYSPROC pglGenVertexArrays;
-extern PFNGLBINDVERTEXARRAYPROC pglBindVertexArray;
-extern PFNGLENABLEVERTEXATTRIBARRAYPROC pglEnableVertexAttribArray;
-extern PFNGLVERTEXATTRIBPOINTERPROC pglVertexAttribPointer;
-extern PFNGLDRAWELEMENTSPROC pglDrawElements;
-extern PFNGLDRAWARRAYSPROC pglDrawArrays;
-extern PFNGLDISABLEVERTEXATTRIBARRAYPROC pglDisableVertexAttribArray;
-extern PFNGLDELETEBUFFERSPROC pglDeleteBuffers;
-extern PFNGLGETERRORPROC pglGetError;
-extern PFNGLGETSTRINGPROC pglGetString;
-extern PFNGLENABLEPROC pglEnable;
-extern PFNGLDEPTHFUNCPROC pglDepthFunc;
-extern PFNGLBLENDFUNCPROC pglBlendFunc;
-extern PFNGLCLEARCOLORPROC pglClearColor;
-extern PFNGLCLEARPROC pglClear;
-extern PFNGLVIEWPORTPROC pglViewport;
+// Using local typedefs instead of PFNGL* from SDL_opengl_glext.h for Windows MSVC compatibility.
+typedef GLuint (*CreateShaderProc)(GLenum);
+typedef void (*ShaderSourceProc)(GLuint, GLsizei, const GLchar**, const GLint*);
+typedef void (*CompileShaderProc)(GLuint);
+typedef void (*GetShaderivProc)(GLuint, GLenum, GLint*);
+typedef void (*GetShaderInfoLogProc)(GLuint, GLsizei, GLsizei*, GLchar*);
+typedef GLuint (*CreateProgramProc)(void);
+typedef void (*AttachShaderProc)(GLuint, GLuint);
+typedef void (*LinkProgramProc)(GLuint);
+typedef void (*GetProgramivProc)(GLuint, GLenum, GLint*);
+typedef void (*GetProgramInfoLogProc)(GLuint, GLsizei, GLsizei*, GLchar*);
+typedef void (*UseProgramProc)(GLuint);
+typedef void (*DeleteProgramProc)(GLuint);
+typedef void (*DeleteShaderProc)(GLuint);
+typedef GLint (*GetUniformLocationProc)(GLuint, const GLchar*);
+typedef void (*UniformMatrix4fvProc)(GLint, GLsizei, GLboolean, const GLfloat*);
+typedef void (*Uniform3fProc)(GLint, GLfloat, GLfloat, GLfloat);
+typedef void (*Uniform1fProc)(GLint, GLfloat);
+typedef void (*UniformMatrix3fvProc)(GLint, GLsizei, GLboolean, const GLfloat*);
+typedef void (*Uniform4fProc)(GLint, GLfloat, GLfloat, GLfloat, GLfloat);
+typedef void (*GenBuffersProc)(GLsizei, GLuint*);
+typedef void (*BindBufferProc)(GLenum, GLuint);
+typedef void (*BufferDataProc)(GLenum, GLsizeiptr, const GLvoid*, GLenum);
+typedef void (*BufferSubDataProc)(GLenum, GLintptr, GLsizeiptr, const GLvoid*);
+typedef void (*GenVertexArraysProc)(GLsizei, GLuint*);
+typedef void (*BindVertexArrayProc)(GLuint);
+typedef void (*EnableVertexAttribArrayProc)(GLuint);
+typedef void (*VertexAttribPointerProc)(GLuint, GLint, GLenum, GLboolean, GLsizei, const GLvoid*);
+typedef void (*DrawElementsProc)(GLenum, GLsizei, GLenum, const GLvoid*);
+typedef void (*DrawArraysProc)(GLenum, GLint, GLsizei);
+typedef void (*DisableVertexAttribArrayProc)(GLuint);
+typedef void (*DeleteBuffersProc)(GLsizei, const GLuint*);
+typedef GLenum (*GetErrorProc)(void);
+typedef const GLubyte* (*GetStringProc)(GLenum);
+typedef void (*EnableProc)(GLenum);
+typedef void (*DepthFuncProc)(GLenum);
+typedef void (*BlendFuncProc)(GLenum, GLenum);
+typedef void (*ClearColorProc)(GLfloat, GLfloat, GLfloat, GLfloat);
+typedef void (*ClearProc)(GLbitfield);
+typedef void (*ViewportProc)(GLint, GLint, GLsizei, GLsizei);
+typedef void (*Uniform4fProc)(GLint, GLfloat, GLfloat, GLfloat, GLfloat);
+
+extern CreateShaderProc pglCreateShader;
+extern ShaderSourceProc pglShaderSource;
+extern CompileShaderProc pglCompileShader;
+extern GetShaderivProc pglGetShaderiv;
+extern GetShaderInfoLogProc pglGetShaderInfoLog;
+extern CreateProgramProc pglCreateProgram;
+extern AttachShaderProc pglAttachShader;
+extern LinkProgramProc pglLinkProgram;
+extern GetProgramivProc pglGetProgramiv;
+extern GetProgramInfoLogProc pglGetProgramInfoLog;
+extern UseProgramProc pglUseProgram;
+extern DeleteProgramProc pglDeleteProgram;
+extern DeleteShaderProc pglDeleteShader;
+extern GetUniformLocationProc pglGetUniformLocation;
+extern UniformMatrix4fvProc pglUniformMatrix4fv;
+extern Uniform3fProc pglUniform3f;
+extern Uniform1fProc pglUniform1f;
+extern UniformMatrix3fvProc pglUniformMatrix3fv;
+extern Uniform4fProc pglUniform4f;
+extern GenBuffersProc pglGenBuffers;
+extern BindBufferProc pglBindBuffer;
+extern BufferDataProc pglBufferData;
+extern BufferSubDataProc pglBufferSubData;
+extern GenVertexArraysProc pglGenVertexArrays;
+extern BindVertexArrayProc pglBindVertexArray;
+extern EnableVertexAttribArrayProc pglEnableVertexAttribArray;
+extern VertexAttribPointerProc pglVertexAttribPointer;
+extern DrawElementsProc pglDrawElements;
+extern DrawArraysProc pglDrawArrays;
+extern DisableVertexAttribArrayProc pglDisableVertexAttribArray;
+extern DeleteBuffersProc pglDeleteBuffers;
+extern GetErrorProc pglGetError;
+extern GetStringProc pglGetString;
+extern EnableProc pglEnable;
+extern DepthFuncProc pglDepthFunc;
+extern BlendFuncProc pglBlendFunc;
+extern ClearColorProc pglClearColor;
+extern ClearProc pglClear;
+extern ViewportProc pglViewport;
 
 #include "sensor_state.hpp"
 
@@ -98,8 +145,6 @@ inline fs::path getProjectRootDir() {
 }
 
 // Forward declarations for vector math functions (defined later).
-Vec3 cross(Vec3 a, Vec3 b);
-double dot(Vec3 a, Vec3 b);
 Vec3 normalized(Vec3 value);
 
 // ---------------------------------------------------------------------------
@@ -267,44 +312,44 @@ static GLuint linkProgram(GLuint vert, GLuint frag) {
 }
 
 static void loadOpenGLFunctions() {
-    pglCreateShader = (PFNGLCREATESHADERPROC)SDL_GL_GetProcAddress("glCreateShader");
-    pglShaderSource = (PFNGLSHADERSOURCEPROC)SDL_GL_GetProcAddress("glShaderSource");
-    pglCompileShader = (PFNGLCOMPILESHADERPROC)SDL_GL_GetProcAddress("glCompileShader");
-    pglGetShaderiv = (PFNGLGETSHADERIVPROC)SDL_GL_GetProcAddress("glGetShaderiv");
-    pglGetShaderInfoLog = (PFNGLGETSHADERINFOLOGPROC)SDL_GL_GetProcAddress("glGetShaderInfoLog");
-    pglCreateProgram = (PFNGLCREATEPROGRAMPROC)SDL_GL_GetProcAddress("glCreateProgram");
-    pglAttachShader = (PFNGLATTACHSHADERPROC)SDL_GL_GetProcAddress("glAttachShader");
-    pglLinkProgram = (PFNGLLINKPROGRAMPROC)SDL_GL_GetProcAddress("glLinkProgram");
-    pglGetProgramiv = (PFNGLGETPROGRAMIVPROC)SDL_GL_GetProcAddress("glGetProgramiv");
-    pglGetProgramInfoLog = (PFNGLGETPROGRAMINFOLOGPROC)SDL_GL_GetProcAddress("glGetProgramInfoLog");
-    pglUseProgram = (PFNGLUSEPROGRAMPROC)SDL_GL_GetProcAddress("glUseProgram");
-    pglDeleteProgram = (PFNGLDELETEPROGRAMPROC)SDL_GL_GetProcAddress("glDeleteProgram");
-    pglDeleteShader = (PFNGLDELETESHADERPROC)SDL_GL_GetProcAddress("glDeleteShader");
-    pglGetUniformLocation = (PFNGLGETUNIFORMLOCATIONPROC)SDL_GL_GetProcAddress("glGetUniformLocation");
-    pglUniformMatrix4fv = (PFNGLUNIFORMMATRIX4FVPROC)SDL_GL_GetProcAddress("glUniformMatrix4fv");
-    pglUniform3f = (PFNGLUNIFORM3FPROC)SDL_GL_GetProcAddress("glUniform3f");
-    pglUniform1f = (PFNGLUNIFORM1FPROC)SDL_GL_GetProcAddress("glUniform1f");
-    pglUniformMatrix3fv = (PFNGLUNIFORMMATRIX3FVPROC)SDL_GL_GetProcAddress("glUniformMatrix3fv");
-    pglGenBuffers = (PFNGLGENBUFFERSPROC)SDL_GL_GetProcAddress("glGenBuffers");
-    pglBindBuffer = (PFNGLBINDBUFFERPROC)SDL_GL_GetProcAddress("glBindBuffer");
-    pglBufferData = (PFNGLBUFFERDATAPROC)SDL_GL_GetProcAddress("glBufferData");
-    pglBufferSubData = (PFNGLBUFFERSUBDATAPROC)SDL_GL_GetProcAddress("glBufferSubData");
-    pglGenVertexArrays = (PFNGLGENVERTEXARRAYSPROC)SDL_GL_GetProcAddress("glGenVertexArrays");
-    pglBindVertexArray = (PFNGLBINDVERTEXARRAYPROC)SDL_GL_GetProcAddress("glBindVertexArray");
-    pglEnableVertexAttribArray = (PFNGLENABLEVERTEXATTRIBARRAYPROC)SDL_GL_GetProcAddress("glEnableVertexAttribArray");
-    pglVertexAttribPointer = (PFNGLVERTEXATTRIBPOINTERPROC)SDL_GL_GetProcAddress("glVertexAttribPointer");
-    pglDrawElements = (PFNGLDRAWELEMENTSPROC)SDL_GL_GetProcAddress("glDrawElements");
-    pglDrawArrays = (PFNGLDRAWARRAYSPROC)SDL_GL_GetProcAddress("glDrawArrays");
-    pglDisableVertexAttribArray = (PFNGLDISABLEVERTEXATTRIBARRAYPROC)SDL_GL_GetProcAddress("glDisableVertexAttribArray");
-    pglDeleteBuffers = (PFNGLDELETEBUFFERSPROC)SDL_GL_GetProcAddress("glDeleteBuffers");
-    pglGetError = (PFNGLGETERRORPROC)SDL_GL_GetProcAddress("glGetError");
-    pglGetString = (PFNGLGETSTRINGPROC)SDL_GL_GetProcAddress("glGetString");
-    pglEnable = (PFNGLENABLEPROC)SDL_GL_GetProcAddress("glEnable");
-    pglDepthFunc = (PFNGLDEPTHFUNCPROC)SDL_GL_GetProcAddress("glDepthFunc");
-    pglBlendFunc = (PFNGLBLENDFUNCPROC)SDL_GL_GetProcAddress("glBlendFunc");
-    pglClearColor = (PFNGLCLEARCOLORPROC)SDL_GL_GetProcAddress("glClearColor");
-    pglClear = (PFNGLCLEARPROC)SDL_GL_GetProcAddress("glClear");
-    pglViewport = (PFNGLVIEWPORTPROC)SDL_GL_GetProcAddress("glViewport");
+    pglCreateShader = (CreateShaderProc)SDL_GL_GetProcAddress("glCreateShader");
+    pglShaderSource = (ShaderSourceProc)SDL_GL_GetProcAddress("glShaderSource");
+    pglCompileShader = (CompileShaderProc)SDL_GL_GetProcAddress("glCompileShader");
+    pglGetShaderiv = (GetShaderivProc)SDL_GL_GetProcAddress("glGetShaderiv");
+    pglGetShaderInfoLog = (GetShaderInfoLogProc)SDL_GL_GetProcAddress("glGetShaderInfoLog");
+    pglCreateProgram = (CreateProgramProc)SDL_GL_GetProcAddress("glCreateProgram");
+    pglAttachShader = (AttachShaderProc)SDL_GL_GetProcAddress("glAttachShader");
+    pglLinkProgram = (LinkProgramProc)SDL_GL_GetProcAddress("glLinkProgram");
+    pglGetProgramiv = (GetProgramivProc)SDL_GL_GetProcAddress("glGetProgramiv");
+    pglGetProgramInfoLog = (GetProgramInfoLogProc)SDL_GL_GetProcAddress("glGetProgramInfoLog");
+    pglUseProgram = (UseProgramProc)SDL_GL_GetProcAddress("glUseProgram");
+    pglDeleteProgram = (DeleteProgramProc)SDL_GL_GetProcAddress("glDeleteProgram");
+    pglDeleteShader = (DeleteShaderProc)SDL_GL_GetProcAddress("glDeleteShader");
+    pglGetUniformLocation = (GetUniformLocationProc)SDL_GL_GetProcAddress("glGetUniformLocation");
+    pglUniformMatrix4fv = (UniformMatrix4fvProc)SDL_GL_GetProcAddress("glUniformMatrix4fv");
+    pglUniform3f = (Uniform3fProc)SDL_GL_GetProcAddress("glUniform3f");
+    pglUniform1f = (Uniform1fProc)SDL_GL_GetProcAddress("glUniform1f");
+    pglUniformMatrix3fv = (UniformMatrix3fvProc)SDL_GL_GetProcAddress("glUniformMatrix3fv");
+    pglGenBuffers = (GenBuffersProc)SDL_GL_GetProcAddress("glGenBuffers");
+    pglBindBuffer = (BindBufferProc)SDL_GL_GetProcAddress("glBindBuffer");
+    pglBufferData = (BufferDataProc)SDL_GL_GetProcAddress("glBufferData");
+    pglBufferSubData = (BufferSubDataProc)SDL_GL_GetProcAddress("glBufferSubData");
+    pglGenVertexArrays = (GenVertexArraysProc)SDL_GL_GetProcAddress("glGenVertexArrays");
+    pglBindVertexArray = (BindVertexArrayProc)SDL_GL_GetProcAddress("glBindVertexArray");
+    pglEnableVertexAttribArray = (EnableVertexAttribArrayProc)SDL_GL_GetProcAddress("glEnableVertexAttribArray");
+    pglVertexAttribPointer = (VertexAttribPointerProc)SDL_GL_GetProcAddress("glVertexAttribPointer");
+    pglDrawElements = (DrawElementsProc)SDL_GL_GetProcAddress("glDrawElements");
+    pglDrawArrays = (DrawArraysProc)SDL_GL_GetProcAddress("glDrawArrays");
+    pglDisableVertexAttribArray = (DisableVertexAttribArrayProc)SDL_GL_GetProcAddress("glDisableVertexAttribArray");
+    pglDeleteBuffers = (DeleteBuffersProc)SDL_GL_GetProcAddress("glDeleteBuffers");
+    pglGetError = (GetErrorProc)SDL_GL_GetProcAddress("glGetError");
+    pglGetString = (GetStringProc)SDL_GL_GetProcAddress("glGetString");
+    pglEnable = (EnableProc)SDL_GL_GetProcAddress("glEnable");
+    pglDepthFunc = (DepthFuncProc)SDL_GL_GetProcAddress("glDepthFunc");
+    pglBlendFunc = (BlendFuncProc)SDL_GL_GetProcAddress("glBlendFunc");
+    pglClearColor = (ClearColorProc)SDL_GL_GetProcAddress("glClearColor");
+    pglClear = (ClearProc)SDL_GL_GetProcAddress("glClear");
+    pglViewport = (ViewportProc)SDL_GL_GetProcAddress("glViewport");
 }
 
 static void checkGLError(const char* op) {
@@ -359,28 +404,12 @@ Vec3 operator+(Vec3 left, Vec3 right) {
     return {left.x + right.x, left.y + right.y, left.z + right.z};
 }
 
-Vec3 operator-(Vec3 left, Vec3 right) {
-    return {left.x - right.x, left.y - right.y, left.z - right.z};
-}
-
 Vec3 operator*(Vec3 point, double amount) {
     return {point.x * amount, point.y * amount, point.z * amount};
 }
 
-Vec3 cross(Vec3 a, Vec3 b) {
-    return {
-        a.y * b.z - a.z * b.y,
-        a.z * b.x - a.x * b.z,
-        a.x * b.y - a.y * b.x,
-    };
-}
-
-double dot(Vec3 a, Vec3 b) {
-    return a.x * b.x + a.y * b.y + a.z * b.z;
-}
-
 Vec3 normalized(Vec3 value) {
-    const double length = std::sqrt(dot(value, value));
+    const double length = std::sqrt(value.x * value.x + value.y * value.y + value.z * value.z);
     if (length <= std::numeric_limits<double>::epsilon()) {
         return {};
     }
@@ -422,7 +451,12 @@ void include(Bounds& bounds, Vec3 point) {
 }
 
 Triangle makeTriangle(Vec3 a, Vec3 b, Vec3 c) {
-    return {a, b, c, normalized(cross(b - a, c - a))};
+    Vec3 edge1 = b - a;
+    Vec3 edge2 = c - a;
+    Vec3 n{edge1.y * edge2.z - edge1.z * edge2.y,
+           edge1.z * edge2.x - edge1.x * edge2.z,
+           edge1.x * edge2.y - edge1.y * edge2.x};
+    return {a, b, c, normalized(n)};
 }
 
 float readLittleEndianFloat(const std::vector<unsigned char>& bytes,
@@ -540,8 +574,11 @@ void normalizeMesh(Mesh& mesh, Vec3& center, double& scale) {
         triangle.a = (triangle.a - center) * scale;
         triangle.b = (triangle.b - center) * scale;
         triangle.c = (triangle.c - center) * scale;
-        triangle.normal = normalized(cross(triangle.b - triangle.a,
-                                            triangle.c - triangle.a));
+        Vec3 edge1 = triangle.b - triangle.a;
+        Vec3 edge2 = triangle.c - triangle.a;
+        triangle.normal = normalized(Vec3{edge1.y * edge2.z - edge1.z * edge2.y,
+                                          edge1.z * edge2.x - edge1.x * edge2.z,
+                                          edge1.x * edge2.y - edge1.y * edge2.x});
     }
 }
 
@@ -834,6 +871,9 @@ private:
     SDL_Rect bottomModelSlider_{};
     SDL_Rect bottomZOffsetSlider_{};
     SDL_Rect autoPerspButton_{};
+
+    std::vector<Pixel> pixels_;
+    std::vector<double> depthBuffer_;
 
     // OpenGL ES 2.0 resources.
     SDL_GLContext glContext_ = nullptr;
