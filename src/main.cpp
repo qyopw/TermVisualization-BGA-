@@ -145,7 +145,7 @@ inline fs::path getProjectRootDir() {
 }
 
 // Forward declarations for vector math functions (defined later).
-Vec3 normalized(Vec3 value);
+Vec3 vec3_normalize(Vec3 value);
 
 // ---------------------------------------------------------------------------
 // Minimal 4x4 matrix math for OpenGL ES 2.0 (no external deps).
@@ -172,16 +172,20 @@ struct Mat4 {
     }
 
     static Mat4 lookAt(const Vec3& eye, const Vec3& center, const Vec3& up) {
-        const Vec3 f = normalized(center - eye);
-        const Vec3 s = normalized(cross(f, up));
-        const Vec3 u = cross(s, f);
+        const Vec3 f = vec3_normalize(center - eye);
+        const Vec3 s{f.y * up.z - f.z * up.y,
+                    f.z * up.x - f.x * up.z,
+                    f.x * up.y - f.y * up.x};
+        const Vec3 u{s.y * f.z - s.z * f.y,
+                    s.z * f.x - s.x * f.z,
+                    s.x * f.y - s.y * f.x};
         Mat4 r = identity();
         r.m[0] = static_cast<float>(s.x); r.m[4] = static_cast<float>(u.x); r.m[8] = static_cast<float>(-f.x);
         r.m[1] = static_cast<float>(s.y); r.m[5] = static_cast<float>(u.y); r.m[9] = static_cast<float>(-f.y);
         r.m[2] = static_cast<float>(s.z); r.m[6] = static_cast<float>(u.z); r.m[10] = static_cast<float>(-f.z);
-        r.m[12] = static_cast<float>(-dot(s, eye));
-        r.m[13] = static_cast<float>(-dot(u, eye));
-        r.m[14] = static_cast<float>(dot(f, eye));
+        r.m[12] = static_cast<float>(-(s.x * eye.x + s.y * eye.y + s.z * eye.z));
+        r.m[13] = static_cast<float>(-(u.x * eye.x + u.y * eye.y + u.z * eye.z));
+        r.m[14] = static_cast<float>(f.x * eye.x + f.y * eye.y + f.z * eye.z);
         return r;
     }
 
@@ -408,7 +412,7 @@ Vec3 operator*(Vec3 point, double amount) {
     return {point.x * amount, point.y * amount, point.z * amount};
 }
 
-Vec3 normalized(Vec3 value) {
+Vec3 vec3_normalize(Vec3 value) {
     const double length = std::sqrt(value.x * value.x + value.y * value.y + value.z * value.z);
     if (length <= std::numeric_limits<double>::epsilon()) {
         return {};
@@ -456,7 +460,11 @@ Triangle makeTriangle(Vec3 a, Vec3 b, Vec3 c) {
     Vec3 n{edge1.y * edge2.z - edge1.z * edge2.y,
            edge1.z * edge2.x - edge1.x * edge2.z,
            edge1.x * edge2.y - edge1.y * edge2.x};
-    return {a, b, c, normalized(n)};
+    const double nlen = std::sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
+    if (nlen <= std::numeric_limits<double>::epsilon()) {
+        return {a, b, c, {0.0, 0.0, 0.0}};
+    }
+    return {a, b, c, {n.x / nlen, n.y / nlen, n.z / nlen}};
 }
 
 float readLittleEndianFloat(const std::vector<unsigned char>& bytes,
@@ -576,9 +584,9 @@ void normalizeMesh(Mesh& mesh, Vec3& center, double& scale) {
         triangle.c = (triangle.c - center) * scale;
         Vec3 edge1 = triangle.b - triangle.a;
         Vec3 edge2 = triangle.c - triangle.a;
-        triangle.normal = normalized(Vec3{edge1.y * edge2.z - edge1.z * edge2.y,
-                                          edge1.z * edge2.x - edge1.x * edge2.z,
-                                          edge1.x * edge2.y - edge1.y * edge2.x});
+        triangle.normal = vec3_normalized(Vec3{edge1.y * edge2.z - edge1.z * edge2.y,
+                                               edge1.z * edge2.x - edge1.x * edge2.z,
+                                               edge1.x * edge2.y - edge1.y * edge2.x});
     }
 }
 
@@ -1163,11 +1171,16 @@ private:
                          direction.y * std::sin(heading);
         const double horizontalY = direction.x * std::sin(heading) +
                                    direction.y * std::cos(heading);
-        return normalized({
+        const Vec3 dir{
             x,
             horizontalY * std::cos(pitch) - direction.z * std::sin(pitch),
             horizontalY * std::sin(pitch) + direction.z * std::cos(pitch),
-        });
+        };
+        const double dlen = std::sqrt(dir.x * dir.x + dir.y * dir.y + dir.z * dir.z);
+        if (dlen <= std::numeric_limits<double>::epsilon()) {
+            return {0.0, 0.0, 0.0};
+        }
+        return {dir.x / dlen, dir.y / dlen, dir.z / dlen};
     }
 
     static double edge(double ax, double ay, double bx, double by,
