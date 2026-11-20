@@ -513,8 +513,10 @@ struct ViewPoint {
 class Viewer {
 public:
     // Loads viewer settings and creates all SDL resources.
-    Viewer(Mesh mesh, SensorState& sensors, bool canEnabled)
+    Viewer(Mesh mesh, SensorState& sensors, bool canEnabled,
+           std::vector<std::uint32_t> canIds)
         : mesh_(std::move(mesh)), sensors_(sensors), canEnabled_(canEnabled),
+          canIds_(std::move(canIds)),
           pixels_(static_cast<std::size_t>(kWidth) * kHeight),
           depthBuffer_(static_cast<std::size_t>(kWidth) * kHeight,
                        std::numeric_limits<double>::infinity()) {
@@ -591,6 +593,7 @@ private:
     Mesh mesh_;
     SensorState& sensors_;
     bool canEnabled_ = false;
+    std::vector<std::uint32_t> canIds_;
     std::vector<Pixel> pixels_;
     std::vector<double> depthBuffer_;
     double heading_ = 35.0;
@@ -728,7 +731,17 @@ private:
         file << "# 1. Параметры запуска программы\n";
         file << "# no-can=1  - отключить приём CAN-данных\n";
         file << "# forced-can=1 - принудительно включить приём CAN-данных\n";
-        file << "no-can=" << (canEnabled_ ? 0 : 1) << "\n\n";
+        file << "no-can=" << (canEnabled_ ? 0 : 1) << "\n";
+        file << "# CAN-ID: до 10 стандартных идентификаторов, через запятую\n";
+        file << "can-ids=";
+        for (std::size_t index = 0; index < canIds_.size(); ++index) {
+            if (index != 0) {
+                file << ",";
+            }
+            file << "0x" << std::uppercase << std::hex << canIds_[index]
+                 << std::dec;
+        }
+        file << "\n\n";
         file << "# 2. Углы просмотра для кнопки \"AUTO PERSPECTIVE\" (в градусах)\n";
         file << "auto-perspective-heading=" << autoPerspHeading_ << "\n";
         file << "auto-perspective-pitch=" << autoPerspPitch_ << "\n";
@@ -1536,6 +1549,73 @@ std::optional<bool> readCanEnabledFromConfig() {
     return canEnabled;
 }
 
+// Parses up to ten comma-separated standard 11-bit CAN identifiers.
+std::vector<std::uint32_t> parseCanIds(const std::string& value) {
+    std::vector<std::uint32_t> canIds;
+    std::size_t start = 0;
+    while (start <= value.size()) {
+        const std::size_t comma = value.find(',', start);
+        const std::string token = trim(value.substr(
+            start, comma == std::string::npos ? std::string::npos : comma - start));
+        if (token.empty()) {
+            throw std::runtime_error("CAN ID list contains an empty entry.");
+        }
+        if (canIds.size() == 10) {
+            throw std::runtime_error("At most 10 CAN IDs may be configured.");
+        }
+        std::size_t parsed = 0;
+        unsigned long id = 0;
+        try {
+            if (token.front() == '-') {
+                throw std::invalid_argument("negative CAN ID");
+            }
+            const bool hasHexPrefix = token.size() > 2 && token[0] == '0' &&
+                (token[1] == 'x' || token[1] == 'X');
+            id = std::stoul(token, &parsed, hasHexPrefix ? 16 : 10);
+        } catch (const std::exception&) {
+            throw std::runtime_error("Invalid CAN ID: " + token);
+        }
+        if (parsed != token.size() || id > 0x7FF) {
+            throw std::runtime_error(
+                "CAN ID must be a standard 11-bit value (0x000-0x7FF): " + token);
+        }
+        canIds.push_back(static_cast<std::uint32_t>(id));
+        if (comma == std::string::npos) {
+            break;
+        }
+        start = comma + 1;
+    }
+    return canIds;
+}
+
+// Loads CAN IDs from config, retaining 0x3C0 if the setting is absent or invalid.
+std::vector<std::uint32_t> readCanIdsFromConfig() {
+    const std::vector<std::uint32_t> defaults{kTemperatureCanId};
+    std::ifstream file(getProjectRootDir() / "config.txt");
+    if (!file) {
+        return defaults;
+    }
+    std::string line;
+    while (std::getline(file, line)) {
+        const std::string trimmed = trim(line);
+        if (trimmed.empty() || trimmed[0] == '#') {
+            continue;
+        }
+        const std::size_t equals = trimmed.find('=');
+        if (equals == std::string::npos || trim(trimmed.substr(0, equals)) != "can-ids") {
+            continue;
+        }
+        try {
+            return parseCanIds(trim(trimmed.substr(equals + 1)));
+        } catch (const std::exception& error) {
+            std::cerr << "Warning: Ignoring invalid can-ids setting: "
+                      << error.what() << ". Using 0x3C0.\n";
+            return defaults;
+        }
+    }
+    return defaults;
+}
+
 // Initializes SDL, loads project data, starts CAN, and runs the viewer.
 int main(int argc, char* argv[]) {
     ProgramOptions options;
@@ -1557,6 +1637,7 @@ int main(int argc, char* argv[]) {
     }
 
     try {
+        const std::vector<std::uint32_t> canIds = readCanIdsFromConfig();
         // Explicit CLI flags take priority over CAN settings from the config.
         if (options.noCanRequested) {
             options.canEnabled = false;
@@ -1604,7 +1685,7 @@ int main(int argc, char* argv[]) {
         if (options.canEnabled) {
             std::string canError;
             const bool receiverStarted = canReceiver.start(
-                options.canInterface, options.canByteOrder,
+                options.canInterface, canIds, options.canByteOrder,
                 [&sensorState](const SensorReading& reading) {
                     sensorState.updateTemperature(reading.sensorId,
                                                   reading.temperatureC);
@@ -1621,7 +1702,7 @@ int main(int argc, char* argv[]) {
             std::cout << "CAN reception disabled.\n";
         }
 
-        Viewer viewer(std::move(mesh), sensorState, options.canEnabled);
+        Viewer viewer(std::move(mesh), sensorState, options.canEnabled, canIds);
         return viewer.run();
     } catch (const std::exception& error) {
         std::cerr << "Error: " << error.what() << '\n';

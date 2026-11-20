@@ -38,3 +38,7 @@ double decodeTemperature(std::uint8_t firstByte, std::uint8_t secondByte,
 bool decodeCanFrame(const CanFrame& frame,
                     std::vector<SensorReading>& readings,
                     CanByteOrder byteOrder = CanByteOrder::LittleEndian);
+bool decodeCanFrame(const CanFrame& frame,
+                    std::vector<SensorReading>& readings,
+                    CanByteOrder byteOrder,
+                    const std::vector<std::uint32_t>& acceptedCanIds);

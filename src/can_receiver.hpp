@@ -6,6 +6,7 @@
 #include <functional>
 #include <string>
 #include <thread>
+#include <vector>
 
 class CanReceiver {
 public:
@@ -21,6 +22,7 @@ public:
 
     // Opens and filters the interface, then starts the receive worker.
     bool start(const std::string& interfaceName,
+               const std::vector<std::uint32_t>& canIds,
                CanByteOrder byteOrder, ReadingHandler onReading,
                std::string& error);
     // Requests worker shutdown and joins it before closing the socket.
@@ -28,7 +30,8 @@ public:
 
 private:
     // Polls SocketCAN and forwards each decoded reading to the handler.
-    void receiveLoop(ReadingHandler onReading, CanByteOrder byteOrder) noexcept;
+    void receiveLoop(ReadingHandler onReading, CanByteOrder byteOrder,
+                     std::vector<std::uint32_t> canIds) noexcept;
 
     std::atomic<bool> stopRequested_{false};
     std::thread worker_;

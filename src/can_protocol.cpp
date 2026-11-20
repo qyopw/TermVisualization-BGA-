@@ -1,5 +1,7 @@
 #include "can_protocol.hpp"
 
+#include <algorithm>
+
 namespace {
 
 // Adds a reading for an occupied in-range slot; invalid IDs leave peers alone.
@@ -36,8 +38,18 @@ double decodeTemperature(std::uint8_t firstByte, std::uint8_t secondByte,
 bool decodeCanFrame(const CanFrame& frame,
                     std::vector<SensorReading>& readings,
                     CanByteOrder byteOrder) {
+    static const std::vector<std::uint32_t> defaultCanIds{kTemperatureCanId};
+    return decodeCanFrame(frame, readings, byteOrder, defaultCanIds);
+}
+
+// Validates a frame against the configured IDs, then decodes both slots.
+bool decodeCanFrame(const CanFrame& frame,
+                    std::vector<SensorReading>& readings,
+                    CanByteOrder byteOrder,
+                    const std::vector<std::uint32_t>& acceptedCanIds) {
     readings.clear();
-    if (frame.id != kTemperatureCanId || frame.isExtended || frame.isRemote ||
+    if (std::find(acceptedCanIds.begin(), acceptedCanIds.end(), frame.id) ==
+            acceptedCanIds.end() || frame.isExtended || frame.isRemote ||
         frame.isError || frame.isFd || frame.length != 8) {
         return false;
     }

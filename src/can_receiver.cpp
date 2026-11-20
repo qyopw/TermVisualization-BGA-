@@ -1,5 +1,6 @@
 #include "can_receiver.hpp"
 
+#include <algorithm>
 #include <cerrno>
 #include <cstring>
 #include <exception>
@@ -21,8 +22,9 @@ CanReceiver::~CanReceiver() {
     stop();
 }
 
-// Opens the fixed protocol filter and launches the receiver worker.
+// Opens filters for configured CAN IDs and launches the receiver worker.
 bool CanReceiver::start(const std::string& interfaceName,
+                        const std::vector<std::uint32_t>& canIds,
                         CanByteOrder byteOrder, ReadingHandler onReading,
                         std::string& error) {
     if (worker_.joinable() || socketFd_ >= 0) {
@@ -33,6 +35,12 @@ bool CanReceiver::start(const std::string& interfaceName,
         error = "CAN interface name cannot be empty.";
         return false;
     }
+    if (canIds.empty() || canIds.size() > 10 ||
+        std::any_of(canIds.begin(), canIds.end(),
+                    [](std::uint32_t canId) { return canId > 0x7FF; })) {
+        error = "CAN ID list must contain 1 to 10 standard 11-bit IDs.";
+        return false;
+    }
 #if BGA_HAS_SOCKETCAN
     socketFd_ = ::socket(PF_CAN, SOCK_RAW, CAN_RAW);
     if (socketFd_ < 0) {
@@ -41,14 +49,19 @@ bool CanReceiver::start(const std::string& interfaceName,
         return false;
     }
 
-    // Match only standard 0x3C0 data frames. Masking EFF, RTR, and ERR flags
-    // excludes extended, remote, and error frames in the kernel filter.
-    can_filter socketFilter{};
-    socketFilter.can_id = kTemperatureCanId;
-    socketFilter.can_mask =
-        CAN_SFF_MASK | CAN_EFF_FLAG | CAN_RTR_FLAG | CAN_ERR_FLAG;
-    if (::setsockopt(socketFd_, SOL_CAN_RAW, CAN_RAW_FILTER, &socketFilter,
-                     sizeof(socketFilter)) < 0) {
+    // Match configured standard IDs and exclude extended, RTR, and error frames.
+    std::vector<can_filter> socketFilters;
+    socketFilters.reserve(canIds.size());
+    for (const std::uint32_t canId : canIds) {
+        can_filter filter{};
+        filter.can_id = static_cast<canid_t>(canId);
+        filter.can_mask =
+            CAN_SFF_MASK | CAN_EFF_FLAG | CAN_RTR_FLAG | CAN_ERR_FLAG;
+        socketFilters.push_back(filter);
+    }
+    if (::setsockopt(socketFd_, SOL_CAN_RAW, CAN_RAW_FILTER,
+                     socketFilters.data(), static_cast<socklen_t>(
+                         socketFilters.size() * sizeof(can_filter))) < 0) {
         error = "Cannot install SocketCAN ID filters: " +
                 std::string(std::strerror(errno));
         ::close(socketFd_);
@@ -80,7 +93,7 @@ bool CanReceiver::start(const std::string& interfaceName,
     stopRequested_.store(false);
     try {
         worker_ = std::thread(&CanReceiver::receiveLoop, this,
-                              std::move(onReading), byteOrder);
+                              std::move(onReading), byteOrder, canIds);
     } catch (const std::exception& exception) {
         error = "Cannot start CAN receiver thread: " +
                 std::string(exception.what());
@@ -91,6 +104,7 @@ bool CanReceiver::start(const std::string& interfaceName,
     return true;
 #else
     (void)byteOrder;
+    (void)canIds;
     (void)onReading;
     error = "SocketCAN is available only on Linux; CAN reception is disabled.";
     return false;
@@ -113,7 +127,8 @@ void CanReceiver::stop() noexcept {
 
 // Polls for classical CAN frames and dispatches decoded sensor readings.
 void CanReceiver::receiveLoop(ReadingHandler onReading,
-                              CanByteOrder byteOrder) noexcept {
+                              CanByteOrder byteOrder,
+                              std::vector<std::uint32_t> canIds) noexcept {
 #if BGA_HAS_SOCKETCAN
     pollfd descriptor{};
     descriptor.fd = socketFd_;
@@ -187,7 +202,7 @@ void CanReceiver::receiveLoop(ReadingHandler onReading,
             frame.data[index] = systemFrame.data[index];
         }
 
-        if (!decodeCanFrame(frame, readings, byteOrder)) {
+        if (!decodeCanFrame(frame, readings, byteOrder, canIds)) {
             continue;
         }
         for (const SensorReading& reading : readings) {
@@ -204,5 +219,6 @@ void CanReceiver::receiveLoop(ReadingHandler onReading,
 #else
     (void)byteOrder;
     (void)onReading;
+    (void)canIds;
 #endif
 }

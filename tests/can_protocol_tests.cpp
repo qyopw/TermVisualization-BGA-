@@ -94,6 +94,18 @@ void testProtocolFrames() {
     expectReading(readings, 0, "1", 0.100, "Big Endian first sensor");
     expectReading(readings, 1, "2", -0.100, "Big Endian second sensor");
 
+    frame.id = 0x3C1;
+    expect(!decodeCanFrame(frame, readings),
+           "non-default CAN ID is rejected unless configured");
+    const std::vector<std::uint32_t> configuredCanIds{0x3C0, 0x3C1};
+    expect(decodeCanFrame(frame, readings, CanByteOrder::BigEndian,
+                          configuredCanIds),
+           "configured CAN ID is accepted");
+    frame.id = 0x3C2;
+    expect(!decodeCanFrame(frame, readings, CanByteOrder::BigEndian,
+                           configuredCanIds),
+           "CAN ID outside configured list is rejected");
+
     frame = makeFrame({23, 0xD2, 0x04, 107, 0x64, 0x80, 0xAA, 0x55});
     expect(decodeCanFrame(frame, readings), "arbitrary valid sensor IDs are accepted");
     expect(readings.size() == 2, "reserved bytes do not affect valid slots");
