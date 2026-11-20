@@ -55,14 +55,14 @@ bool CanReceiver::start(const std::string& interfaceName,
         return false;
     }
 
-    // Match configured standard IDs and exclude extended, RTR, and error frames.
+    // Match configured standard data IDs. Do not mask CAN_ERR_FLAG here:
+    // Linux treats it as an error-frame subscription, not a normal ID bit.
     std::vector<can_filter> socketFilters;
     socketFilters.reserve(canIds.size());
     for (const std::uint32_t canId : canIds) {
         can_filter filter{};
         filter.can_id = static_cast<canid_t>(canId);
-        filter.can_mask =
-            CAN_SFF_MASK | CAN_EFF_FLAG | CAN_RTR_FLAG | CAN_ERR_FLAG;
+        filter.can_mask = CAN_SFF_MASK | CAN_EFF_FLAG | CAN_RTR_FLAG;
         socketFilters.push_back(filter);
     }
     if (::setsockopt(socketFd_, SOL_CAN_RAW, CAN_RAW_FILTER,
