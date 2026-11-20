@@ -1630,7 +1630,7 @@ std::vector<std::uint32_t> readCanIdsFromConfig() {
     return defaults;
 }
 
-// Reads one of the supported temperature steps, defaulting safely to 0.001 C.
+// Reads one of the supported temperature steps, defaulting safely to 0.01 C.
 double readTemperatureStepFromConfig() {
     std::ifstream file(getProjectRootDir() / "config.txt");
     if (!file) {
@@ -1653,7 +1653,7 @@ double readTemperatureStepFromConfig() {
         if (value == "0.01") return 0.01;
         if (value == "0.001") return 0.001;
         std::cerr << "Warning: Unsupported temperature-step '" << value
-                  << "'. Using 0.001.\n";
+                  << "'. Using 0.01.\n";
         return kDefaultTemperatureStepC;
     }
     return kDefaultTemperatureStepC;

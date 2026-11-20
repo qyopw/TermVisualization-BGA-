@@ -7,7 +7,7 @@
 
 constexpr std::uint32_t kTemperatureCanId = 0x3C0;
 constexpr std::uint8_t kMaximumSensorId = 107;
-constexpr double kDefaultTemperatureStepC = 0.001;
+constexpr double kDefaultTemperatureStepC = 0.01;
 
 // Selects how the two temperature bytes are assembled into one raw value.
 enum class CanByteOrder {
