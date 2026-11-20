@@ -1,25 +1,70 @@
-; C:\Users\Akademik\Desktop\Term.sensor.TMH.xmt
-;   CAN messages saved by PCAN-View v6.1.0.1056
+; TermVisualization-BGA: test CAN frames for temperature sensors
+; PCAN-View XMT format
 ;
-; Columns descriptions:
-; ~~~~~~~~~~~~~~~~~~~~~
+; CAN-ID 0x3C0; standard CAN 2.0 data frame; DLC=8.
+; Payload: [sensor_index][temperature: 2 bytes][sensor_index][temperature: 2 bytes][00][00].
+; Temperature bytes are zero placeholders; replace them with test values.
+; Sensor indexes in this file are assumed 1-based and correspond to sensors.csv IDs.
+; The final second sensor slot is unused (00h) because the project has 107 sensors.;
+; Columns:
 ; +Message ID
 ; |            +Cycle time in ms (0=manual)
 ; |            |  +Data length
 ; |            |  |  +Frame type
-; |            |  |  |  +Message data
+; |            |  |  |  +Data bytes
 ; |            |  |  |  |
-00000001h      1  8  D 00h 00h 00h 00h 00h 00h 00h 00h ; T.sensor 1-8
-00000002h      2  8  D 00h 00h 00h 00h 00h 00h 00h 00h ; T.sensor 9-16
-00000003h      3  8  D 00h 00h 00h 00h 00h 00h 00h 00h ; T.sensor 17-24
-00000004h      4  8  D 00h 00h 00h 00h 00h 00h 00h 00h ; T.sensor 25-32
-00000005h      5  8  D 00h 00h 00h 00h 00h 00h 00h 00h ; T.sensor 33-40
-00000006h      1  8  D 00h 00h 00h 00h 00h 00h 00h 00h ; T.sensor 41-48
-00000007h      2  8  D 00h 00h 00h 00h 00h 00h 00h 00h ; T.sensor 49-56
-00000008h      3  8  D 00h 00h 00h 00h 00h 00h 00h 00h ; T.sensor 57-64
-00000009h      4  8  D 00h 00h 00h 00h 00h 00h 00h 00h ; T.sensor 65-72
-00000010h      5  8  D 00h 00h 00h 00h 00h 00h 00h 00h ; T.sensor 73-80
-00000011h      1  8  D 00h 00h 00h 00h 00h 00h 00h 00h ; T.sensor 81-88
-00000012h      2  8  D 00h 00h 00h 00h 00h 00h 00h 00h ; T.sensor 89-96
-00000013h      3  8  D 00h 00h 00h 00h 00h 00h 00h 00h ; T.sensor 97-104
-00000014h      4  8  D 00h 00h 00h 00h 00h 00h 00h 00h ; T.sensor 105-107
+
+000003C0h      0  8  D 01h 00h 00h 02h 00h 00h 00h 00h ; T.sensor 1-2
+000003C0h      0  8  D 03h 00h 00h 04h 00h 00h 00h 00h ; T.sensor 3-4
+000003C0h      0  8  D 05h 00h 00h 06h 00h 00h 00h 00h ; T.sensor 5-6
+000003C0h      0  8  D 07h 00h 00h 08h 00h 00h 00h 00h ; T.sensor 7-8
+000003C0h      0  8  D 09h 00h 00h 0Ah 00h 00h 00h 00h ; T.sensor 9-10
+000003C0h      0  8  D 0Bh 00h 00h 0Ch 00h 00h 00h 00h ; T.sensor 11-12
+000003C0h      0  8  D 0Dh 00h 00h 0Eh 00h 00h 00h 00h ; T.sensor 13-14
+000003C0h      0  8  D 0Fh 00h 00h 10h 00h 00h 00h 00h ; T.sensor 15-16
+000003C0h      0  8  D 11h 00h 00h 12h 00h 00h 00h 00h ; T.sensor 17-18
+000003C0h      0  8  D 13h 00h 00h 14h 00h 00h 00h 00h ; T.sensor 19-20
+000003C0h      0  8  D 15h 00h 00h 16h 00h 00h 00h 00h ; T.sensor 21-22
+000003C0h      0  8  D 17h 00h 00h 18h 00h 00h 00h 00h ; T.sensor 23-24
+000003C0h      0  8  D 19h 00h 00h 1Ah 00h 00h 00h 00h ; T.sensor 25-26
+000003C0h      0  8  D 1Bh 00h 00h 1Ch 00h 00h 00h 00h ; T.sensor 27-28
+000003C0h      0  8  D 1Dh 00h 00h 1Eh 00h 00h 00h 00h ; T.sensor 29-30
+000003C0h      0  8  D 1Fh 00h 00h 20h 00h 00h 00h 00h ; T.sensor 31-32
+000003C0h      0  8  D 21h 00h 00h 22h 00h 00h 00h 00h ; T.sensor 33-34
+000003C0h      0  8  D 23h 00h 00h 24h 00h 00h 00h 00h ; T.sensor 35-36
+000003C0h      0  8  D 25h 00h 00h 26h 00h 00h 00h 00h ; T.sensor 37-38
+000003C0h      0  8  D 27h 00h 00h 28h 00h 00h 00h 00h ; T.sensor 39-40
+000003C0h      0  8  D 29h 00h 00h 2Ah 00h 00h 00h 00h ; T.sensor 41-42
+000003C0h      0  8  D 2Bh 00h 00h 2Ch 00h 00h 00h 00h ; T.sensor 43-44
+000003C0h      0  8  D 2Dh 00h 00h 2Eh 00h 00h 00h 00h ; T.sensor 45-46
+000003C0h      0  8  D 2Fh 00h 00h 30h 00h 00h 00h 00h ; T.sensor 47-48
+000003C0h      0  8  D 31h 00h 00h 32h 00h 00h 00h 00h ; T.sensor 49-50
+000003C0h      0  8  D 33h 00h 00h 34h 00h 00h 00h 00h ; T.sensor 51-52
+000003C0h      0  8  D 35h 00h 00h 36h 00h 00h 00h 00h ; T.sensor 53-54
+000003C0h      0  8  D 37h 00h 00h 38h 00h 00h 00h 00h ; T.sensor 55-56
+000003C0h      0  8  D 39h 00h 00h 3Ah 00h 00h 00h 00h ; T.sensor 57-58
+000003C0h      0  8  D 3Bh 00h 00h 3Ch 00h 00h 00h 00h ; T.sensor 59-60
+000003C0h      0  8  D 3Dh 00h 00h 3Eh 00h 00h 00h 00h ; T.sensor 61-62
+000003C0h      0  8  D 3Fh 00h 00h 40h 00h 00h 00h 00h ; T.sensor 63-64
+000003C0h      0  8  D 41h 00h 00h 42h 00h 00h 00h 00h ; T.sensor 65-66
+000003C0h      0  8  D 43h 00h 00h 44h 00h 00h 00h 00h ; T.sensor 67-68
+000003C0h      0  8  D 45h 00h 00h 46h 00h 00h 00h 00h ; T.sensor 69-70
+000003C0h      0  8  D 47h 00h 00h 48h 00h 00h 00h 00h ; T.sensor 71-72
+000003C0h      0  8  D 49h 00h 00h 4Ah 00h 00h 00h 00h ; T.sensor 73-74
+000003C0h      0  8  D 4Bh 00h 00h 4Ch 00h 00h 00h 00h ; T.sensor 75-76
+000003C0h      0  8  D 4Dh 00h 00h 4Eh 00h 00h 00h 00h ; T.sensor 77-78
+000003C0h      0  8  D 4Fh 00h 00h 50h 00h 00h 00h 00h ; T.sensor 79-80
+000003C0h      0  8  D 51h 00h 00h 52h 00h 00h 00h 00h ; T.sensor 81-82
+000003C0h      0  8  D 53h 00h 00h 54h 00h 00h 00h 00h ; T.sensor 83-84
+000003C0h      0  8  D 55h 00h 00h 56h 00h 00h 00h 00h ; T.sensor 85-86
+000003C0h      0  8  D 57h 00h 00h 58h 00h 00h 00h 00h ; T.sensor 87-88
+000003C0h      0  8  D 59h 00h 00h 5Ah 00h 00h 00h 00h ; T.sensor 89-90
+000003C0h      0  8  D 5Bh 00h 00h 5Ch 00h 00h 00h 00h ; T.sensor 91-92
+000003C0h      0  8  D 5Dh 00h 00h 5Eh 00h 00h 00h 00h ; T.sensor 93-94
+000003C0h      0  8  D 5Fh 00h 00h 60h 00h 00h 00h 00h ; T.sensor 95-96
+000003C0h      0  8  D 61h 00h 00h 62h 00h 00h 00h 00h ; T.sensor 97-98
+000003C0h      0  8  D 63h 00h 00h 64h 00h 00h 00h 00h ; T.sensor 99-100
+000003C0h      0  8  D 65h 00h 00h 66h 00h 00h 00h 00h ; T.sensor 101-102
+000003C0h      0  8  D 67h 00h 00h 68h 00h 00h 00h 00h ; T.sensor 103-104
+000003C0h      0  8  D 69h 00h 00h 6Ah 00h 00h 00h 00h ; T.sensor 105-106
+000003C0h      0  8  D 6Bh 00h 00h 00h 00h 00h 00h 00h ; T.sensor 107; second slot unused
