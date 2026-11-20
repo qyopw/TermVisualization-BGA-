@@ -23,7 +23,8 @@ public:
     // Opens and filters the interface, then starts the receive worker.
     bool start(const std::string& interfaceName,
                const std::vector<std::uint32_t>& canIds,
-               CanByteOrder byteOrder, ReadingHandler onReading,
+               CanByteOrder byteOrder, double temperatureStep,
+               ReadingHandler onReading,
                std::string& error);
     // Requests worker shutdown and joins it before closing the socket.
     void stop() noexcept;
@@ -31,6 +32,7 @@ public:
 private:
     // Polls SocketCAN and forwards each decoded reading to the handler.
     void receiveLoop(ReadingHandler onReading, CanByteOrder byteOrder,
+                     double temperatureStep,
                      std::vector<std::uint32_t> canIds) noexcept;
 
     std::atomic<bool> stopRequested_{false};

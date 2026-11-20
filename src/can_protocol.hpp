@@ -7,7 +7,7 @@
 
 constexpr std::uint32_t kTemperatureCanId = 0x3C0;
 constexpr std::uint8_t kMaximumSensorId = 107;
-constexpr double kTemperatureScaleC = 0.001;
+constexpr double kDefaultTemperatureStepC = 0.001;
 
 // Selects how the two temperature bytes are assembled into one raw value.
 enum class CanByteOrder {
@@ -32,7 +32,8 @@ struct SensorReading {
 
 // Decodes one SIGN-MAGNITUDE temperature using the selected byte order.
 double decodeTemperature(std::uint8_t firstByte, std::uint8_t secondByte,
-                         CanByteOrder byteOrder = CanByteOrder::LittleEndian) noexcept;
+                         CanByteOrder byteOrder = CanByteOrder::LittleEndian,
+                         double temperatureStep = kDefaultTemperatureStepC) noexcept;
 
 // Validates a protocol frame and returns its zero, one, or two sensor readings.
 bool decodeCanFrame(const CanFrame& frame,
@@ -41,4 +42,5 @@ bool decodeCanFrame(const CanFrame& frame,
 bool decodeCanFrame(const CanFrame& frame,
                     std::vector<SensorReading>& readings,
                     CanByteOrder byteOrder,
-                    const std::vector<std::uint32_t>& acceptedCanIds);
+                    const std::vector<std::uint32_t>& acceptedCanIds,
+                    double temperatureStep = kDefaultTemperatureStepC);

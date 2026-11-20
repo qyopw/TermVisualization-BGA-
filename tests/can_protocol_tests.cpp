@@ -67,6 +67,16 @@ void testTemperatureDecoding() {
                "Big Endian SIGN-MAGNITUDE 0x8064 decodes to -0.100 C");
     expectNear(decodeTemperature(0x04, 0xD2, CanByteOrder::BigEndian), 1.234,
                "Big Endian fractional temperature decodes correctly");
+    expectNear(decodeTemperature(1, 0, CanByteOrder::LittleEndian, 1.0), 1.0,
+               "temperature step 1 C is applied");
+    expectNear(decodeTemperature(1, 0, CanByteOrder::LittleEndian, 0.1), 0.1,
+               "temperature step 0.1 C is applied");
+    expectNear(decodeTemperature(1, 0, CanByteOrder::LittleEndian, 0.01), 0.01,
+               "temperature step 0.01 C is applied");
+    expectNear(decodeTemperature(0xFF, 0x7F), 32.767,
+               "0.001 C step has a maximum of +32.767 C");
+    expectNear(decodeTemperature(0xFF, 0xFF), -32.767,
+               "0.001 C step has a minimum of -32.767 C");
 }
 
 // Verifies the two-slot payload layout and slot-level ID handling.
@@ -94,6 +104,14 @@ void testProtocolFrames() {
     expectReading(readings, 0, "1", 0.100, "Big Endian first sensor");
     expectReading(readings, 1, "2", -0.100, "Big Endian second sensor");
 
+    frame = makeFrame({1, 0x64, 0x00, 0, 0x00, 0x00, 0, 0});
+    expect(decodeCanFrame(frame, readings, CanByteOrder::LittleEndian,
+                          std::vector<std::uint32_t>{kTemperatureCanId}, 0.01),
+           "frame accepts configured temperature step");
+    expectReading(readings, 0, "1", 1.0, "frame temperature uses 0.01 C step");
+
+    frame = makeFrame({0x01, 0x00, 0x64, 0x02,
+                       0x80, 0x64, 0x00, 0x00});
     frame.id = 0x3C1;
     expect(!decodeCanFrame(frame, readings),
            "non-default CAN ID is rejected unless configured");

@@ -25,7 +25,8 @@ CanReceiver::~CanReceiver() {
 // Opens filters for configured CAN IDs and launches the receiver worker.
 bool CanReceiver::start(const std::string& interfaceName,
                         const std::vector<std::uint32_t>& canIds,
-                        CanByteOrder byteOrder, ReadingHandler onReading,
+                        CanByteOrder byteOrder, double temperatureStep,
+                        ReadingHandler onReading,
                         std::string& error) {
     if (worker_.joinable() || socketFd_ >= 0) {
         error = "CAN receiver has already been started.";
@@ -39,6 +40,11 @@ bool CanReceiver::start(const std::string& interfaceName,
         std::any_of(canIds.begin(), canIds.end(),
                     [](std::uint32_t canId) { return canId > 0x7FF; })) {
         error = "CAN ID list must contain 1 to 10 standard 11-bit IDs.";
+        return false;
+    }
+    if (temperatureStep != 1.0 && temperatureStep != 0.1 &&
+        temperatureStep != 0.01 && temperatureStep != 0.001) {
+        error = "Temperature step must be 1, 0.1, 0.01, or 0.001 C.";
         return false;
     }
 #if BGA_HAS_SOCKETCAN
@@ -93,7 +99,8 @@ bool CanReceiver::start(const std::string& interfaceName,
     stopRequested_.store(false);
     try {
         worker_ = std::thread(&CanReceiver::receiveLoop, this,
-                              std::move(onReading), byteOrder, canIds);
+                              std::move(onReading), byteOrder, temperatureStep,
+                              canIds);
     } catch (const std::exception& exception) {
         error = "Cannot start CAN receiver thread: " +
                 std::string(exception.what());
@@ -104,6 +111,7 @@ bool CanReceiver::start(const std::string& interfaceName,
     return true;
 #else
     (void)byteOrder;
+    (void)temperatureStep;
     (void)canIds;
     (void)onReading;
     error = "SocketCAN is available only on Linux; CAN reception is disabled.";
@@ -128,6 +136,7 @@ void CanReceiver::stop() noexcept {
 // Polls for classical CAN frames and dispatches decoded sensor readings.
 void CanReceiver::receiveLoop(ReadingHandler onReading,
                               CanByteOrder byteOrder,
+                              double temperatureStep,
                               std::vector<std::uint32_t> canIds) noexcept {
 #if BGA_HAS_SOCKETCAN
     pollfd descriptor{};
@@ -202,7 +211,8 @@ void CanReceiver::receiveLoop(ReadingHandler onReading,
             frame.data[index] = systemFrame.data[index];
         }
 
-        if (!decodeCanFrame(frame, readings, byteOrder, canIds)) {
+        if (!decodeCanFrame(frame, readings, byteOrder, canIds,
+                            temperatureStep)) {
             continue;
         }
         for (const SensorReading& reading : readings) {
@@ -218,6 +228,7 @@ void CanReceiver::receiveLoop(ReadingHandler onReading,
     }
 #else
     (void)byteOrder;
+    (void)temperatureStep;
     (void)onReading;
     (void)canIds;
 #endif

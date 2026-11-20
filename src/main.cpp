@@ -514,9 +514,10 @@ class Viewer {
 public:
     // Loads viewer settings and creates all SDL resources.
     Viewer(Mesh mesh, SensorState& sensors, bool canEnabled,
-           std::vector<std::uint32_t> canIds)
+           std::vector<std::uint32_t> canIds, double temperatureStep)
         : mesh_(std::move(mesh)), sensors_(sensors), canEnabled_(canEnabled),
           canIds_(std::move(canIds)),
+          temperatureStep_(temperatureStep),
           pixels_(static_cast<std::size_t>(kWidth) * kHeight),
           depthBuffer_(static_cast<std::size_t>(kWidth) * kHeight,
                        std::numeric_limits<double>::infinity()) {
@@ -594,6 +595,7 @@ private:
     SensorState& sensors_;
     bool canEnabled_ = false;
     std::vector<std::uint32_t> canIds_;
+    double temperatureStep_ = kDefaultTemperatureStepC;
     std::vector<Pixel> pixels_;
     std::vector<double> depthBuffer_;
     double heading_ = 35.0;
@@ -740,6 +742,18 @@ private:
             }
             file << "0x" << std::uppercase << std::hex << canIds_[index]
                  << std::dec;
+        }
+        file << "\n";
+        file << "# Шаг температуры в градусах: 1, 0.1, 0.01 или 0.001\n";
+        file << "temperature-step=";
+        if (temperatureStep_ == 1.0) {
+            file << "1";
+        } else if (temperatureStep_ == 0.1) {
+            file << "0.1";
+        } else if (temperatureStep_ == 0.01) {
+            file << "0.01";
+        } else {
+            file << "0.001";
         }
         file << "\n\n";
         file << "# 2. Углы просмотра для кнопки \"AUTO PERSPECTIVE\" (в градусах)\n";
@@ -1616,6 +1630,35 @@ std::vector<std::uint32_t> readCanIdsFromConfig() {
     return defaults;
 }
 
+// Reads one of the supported temperature steps, defaulting safely to 0.001 C.
+double readTemperatureStepFromConfig() {
+    std::ifstream file(getProjectRootDir() / "config.txt");
+    if (!file) {
+        return kDefaultTemperatureStepC;
+    }
+    std::string line;
+    while (std::getline(file, line)) {
+        const std::string trimmed = trim(line);
+        if (trimmed.empty() || trimmed[0] == '#') {
+            continue;
+        }
+        const std::size_t equals = trimmed.find('=');
+        if (equals == std::string::npos ||
+            trim(trimmed.substr(0, equals)) != "temperature-step") {
+            continue;
+        }
+        const std::string value = trim(trimmed.substr(equals + 1));
+        if (value == "1") return 1.0;
+        if (value == "0.1") return 0.1;
+        if (value == "0.01") return 0.01;
+        if (value == "0.001") return 0.001;
+        std::cerr << "Warning: Unsupported temperature-step '" << value
+                  << "'. Using 0.001.\n";
+        return kDefaultTemperatureStepC;
+    }
+    return kDefaultTemperatureStepC;
+}
+
 // Initializes SDL, loads project data, starts CAN, and runs the viewer.
 int main(int argc, char* argv[]) {
     ProgramOptions options;
@@ -1638,6 +1681,7 @@ int main(int argc, char* argv[]) {
 
     try {
         const std::vector<std::uint32_t> canIds = readCanIdsFromConfig();
+        const double temperatureStep = readTemperatureStepFromConfig();
         // Explicit CLI flags take priority over CAN settings from the config.
         if (options.noCanRequested) {
             options.canEnabled = false;
@@ -1686,6 +1730,7 @@ int main(int argc, char* argv[]) {
             std::string canError;
             const bool receiverStarted = canReceiver.start(
                 options.canInterface, canIds, options.canByteOrder,
+                temperatureStep,
                 [&sensorState](const SensorReading& reading) {
                     sensorState.updateTemperature(reading.sensorId,
                                                   reading.temperatureC);
@@ -1702,7 +1747,8 @@ int main(int argc, char* argv[]) {
             std::cout << "CAN reception disabled.\n";
         }
 
-        Viewer viewer(std::move(mesh), sensorState, options.canEnabled, canIds);
+        Viewer viewer(std::move(mesh), sensorState, options.canEnabled, canIds,
+                      temperatureStep);
         return viewer.run();
     } catch (const std::exception& error) {
         std::cerr << "Error: " << error.what() << '\n';
