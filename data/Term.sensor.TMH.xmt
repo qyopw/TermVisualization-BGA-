@@ -1,11 +1,11 @@
-; TermVisualization-BGA: test CAN frames for temperature sensors
+; TermVisualization-BGA: Classical CAN temperature examples
 ; PCAN-View XMT format
 ;
-; CAN-ID 0x3C0; standard CAN 2.0 data frame; DLC=8.
-; Payload: [sensor_index][temperature: 2 bytes][sensor_index][temperature: 2 bytes][00][00].
-; Temperature bytes are zero placeholders; replace them with test values.
-; Sensor indexes in this file are assumed 1-based and correspond to sensors.csv IDs.
-; The final second sensor slot is unused (00h) because the project has 107 sensors.;
+; CAN-ID 0x3C0; standard 11-bit CAN 2.0 data frame; DLC=8.
+; Payload: [sensor ID][temperature LSB][temperature MSB] x 2 [reserved] [reserved].
+; Temperature is 16-bit SIGN-MAGNITUDE, Little Endian, scaled by 0.001 C with no offset.
+; Sensor IDs 1-107 match sensors.csv; ID 00h marks an unused slot.
+; The last two payload bytes are reserved and ignored.
 ; Columns:
 ; +Message ID
 ; |            +Cycle time in ms (0=manual)
@@ -14,9 +14,9 @@
 ; |            |  |  |  +Data bytes
 ; |            |  |  |  |
 
-000003C0h      0  8  D 01h 00h 00h 02h 00h 00h 00h 00h ; T.sensor 1-2
+000003C0h      0  8  D 01h 64h 00h 02h 64h 80h 00h 00h ; T.sensor 1-2 (+0.100, -0.100 C)
 000003C0h      0  8  D 03h 00h 00h 04h 00h 00h 00h 00h ; T.sensor 3-4
-000003C0h      0  8  D 05h 00h 00h 06h 00h 00h 00h 00h ; T.sensor 5-6
+000003C0h      0  8  D 05h E8h 03h 06h E8h 83h 00h 00h ; T.sensor 5-6 (+1.000, -1.000 C)
 000003C0h      0  8  D 07h 00h 00h 08h 00h 00h 00h 00h ; T.sensor 7-8
 000003C0h      0  8  D 09h 00h 00h 0Ah 00h 00h 00h 00h ; T.sensor 9-10
 000003C0h      0  8  D 0Bh 00h 00h 0Ch 00h 00h 00h 00h ; T.sensor 11-12

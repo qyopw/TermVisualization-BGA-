@@ -17,6 +17,7 @@
 #include <iostream>
 #include <iterator>
 #include <limits>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -33,7 +34,7 @@
 
 namespace fs = std::filesystem;
 
-// Возвращает каталог, в котором находится исполняемый файл.
+// Returns the executable directory using the platform API.
 inline fs::path getExeDir() {
 #ifdef _WIN32
     char buffer[MAX_PATH];
@@ -43,17 +44,50 @@ inline fs::path getExeDir() {
     }
     return fs::path(buffer).parent_path();
 #else
+    char* basePath = SDL_GetBasePath();
+    if (basePath != nullptr) {
+        const fs::path executableDirectory(basePath);
+        SDL_free(basePath);
+        return executableDirectory;
+    }
     return fs::current_path();
 #endif
 }
 
-// Возвращает корень проекта (два уровня вверх от build/Release/).
+// Finds the project root from the executable or working directory.
 inline fs::path getProjectRootDir() {
-    auto dir = getExeDir();
-    // build/Release/ -> build/ -> project root
-    dir = dir.parent_path();  // build/
-    dir = dir.parent_path();  // project root
-    return dir;
+    // Walks upward until the source-tree marker is found.
+    const auto findRoot = [](fs::path directory) {
+        std::error_code error;
+        while (!directory.empty()) {
+            if (fs::exists(directory / "CMakeLists.txt", error) && !error) {
+                return directory;
+            }
+            error.clear();
+            const fs::path parent = directory.parent_path();
+            if (parent == directory) {
+                break;
+            }
+            directory = parent;
+        }
+        return fs::path{};
+    };
+
+    const fs::path executableDirectory = getExeDir();
+    fs::path root = findRoot(executableDirectory);
+    if (!root.empty()) {
+        return root;
+    }
+
+    std::error_code error;
+    const fs::path workingDirectory = fs::current_path(error);
+    if (!error) {
+        root = findRoot(workingDirectory);
+        if (!root.empty()) {
+            return root;
+        }
+    }
+    return executableDirectory.empty() ? fs::path(".") : executableDirectory;
 }
 
 namespace {
@@ -62,9 +96,6 @@ constexpr int kWidth = 800;
 constexpr int kHeight = 480;
 constexpr int kPanelX = 544;
 constexpr int kPanelWidth = kWidth - kPanelX;
-constexpr int kSliderX = kPanelX + 20;
-constexpr int kSliderY = 78;
-constexpr int kSliderWidth = kPanelWidth - 40;
 constexpr double kModelSize = 10.0;
 constexpr double kNearPlane = 0.1;
 
@@ -90,6 +121,7 @@ constexpr int kAutoPerspButtonH = 24;
 
 using Pixel = std::uint32_t;
 
+// Packs RGB channels into the renderer's opaque ARGB format.
 constexpr Pixel rgb(int red, int green, int blue) {
     return 0xFF000000u |
            (static_cast<Pixel>(red & 0xFF) << 16) |
@@ -97,18 +129,22 @@ constexpr Pixel rgb(int red, int green, int blue) {
            static_cast<Pixel>(blue & 0xFF);
 }
 
+// Adds two three-dimensional vectors component-wise.
 Vec3 operator+(Vec3 left, Vec3 right) {
     return {left.x + right.x, left.y + right.y, left.z + right.z};
 }
 
+// Subtracts one three-dimensional vector from another.
 Vec3 operator-(Vec3 left, Vec3 right) {
     return {left.x - right.x, left.y - right.y, left.z - right.z};
 }
 
+// Scales a three-dimensional vector by a scalar.
 Vec3 operator*(Vec3 point, double amount) {
     return {point.x * amount, point.y * amount, point.z * amount};
 }
 
+// Computes the cross product of two vectors.
 Vec3 cross(Vec3 a, Vec3 b) {
     return {
         a.y * b.z - a.z * b.y,
@@ -117,10 +153,12 @@ Vec3 cross(Vec3 a, Vec3 b) {
     };
 }
 
+// Computes the dot product of two vectors.
 double dot(Vec3 a, Vec3 b) {
     return a.x * b.x + a.y * b.y + a.z * b.z;
 }
 
+// Returns a unit vector, or zero for a near-zero input.
 Vec3 normalized(Vec3 value) {
     const double length = std::sqrt(dot(value, value));
     if (length <= std::numeric_limits<double>::epsilon()) {
@@ -154,6 +192,7 @@ struct Mesh {
     Bounds bounds;
 };
 
+// Expands a bounding box to include one point.
 void include(Bounds& bounds, Vec3 point) {
     bounds.minimum.x = std::min(bounds.minimum.x, point.x);
     bounds.minimum.y = std::min(bounds.minimum.y, point.y);
@@ -163,10 +202,12 @@ void include(Bounds& bounds, Vec3 point) {
     bounds.maximum.z = std::max(bounds.maximum.z, point.z);
 }
 
+// Creates a triangle and derives its surface normal.
 Triangle makeTriangle(Vec3 a, Vec3 b, Vec3 c) {
     return {a, b, c, normalized(cross(b - a, c - a))};
 }
 
+// Reads one IEEE-754 float stored in a binary STL's Little Endian layout.
 float readLittleEndianFloat(const std::vector<unsigned char>& bytes,
                             std::size_t offset) {
     const std::uint32_t bits =
@@ -179,12 +220,14 @@ float readLittleEndianFloat(const std::vector<unsigned char>& bytes,
     return value;
 }
 
+// Parses binary or ASCII STL data and computes mesh bounds.
 Mesh parseStl(const std::vector<unsigned char>& bytes, const std::string& source) {
     if (bytes.size() < 5) {
         throw std::runtime_error("STL file is empty or too short: " + source);
     }
 
     Mesh mesh;
+    // Validates every vertex and updates bounds before adding a triangle.
     const auto add = [&mesh](Vec3 a, Vec3 b, Vec3 c) {
         for (const Vec3 point : {a, b, c}) {
             if (!std::isfinite(point.x) || !std::isfinite(point.y) ||
@@ -258,6 +301,7 @@ Mesh parseStl(const std::vector<unsigned char>& bytes, const std::string& source
     return mesh;
 }
 
+// Reads an STL file and delegates format parsing to parseStl.
 Mesh loadStl(const fs::path& path) {
     std::ifstream input(path, std::ios::binary);
     if (!input) {
@@ -269,6 +313,7 @@ Mesh loadStl(const fs::path& path) {
     return parseStl(bytes, path.string());
 }
 
+// Centers and scales the mesh while updating its triangle normals.
 void normalizeMesh(Mesh& mesh, Vec3& center, double& scale) {
     center = (mesh.bounds.minimum + mesh.bounds.maximum) * 0.5;
     const Vec3 extent = mesh.bounds.maximum - mesh.bounds.minimum;
@@ -287,6 +332,7 @@ void normalizeMesh(Mesh& mesh, Vec3& center, double& scale) {
     }
 }
 
+// Removes surrounding whitespace from a string.
 std::string trim(std::string value) {
     const auto first = value.find_first_not_of(" \t\r\n");
     if (first == std::string::npos) {
@@ -296,6 +342,7 @@ std::string trim(std::string value) {
     return value.substr(first, last - first + 1);
 }
 
+// Splits one CSV row while honoring quoted fields and escaped quotes.
 std::vector<std::string> parseCsvLine(std::string_view line) {
     std::vector<std::string> fields;
     std::string field;
@@ -323,6 +370,7 @@ std::vector<std::string> parseCsvLine(std::string_view line) {
     return fields;
 }
 
+// Converts ASCII letters to lowercase for case-insensitive headers.
 std::string lowercase(std::string value) {
     std::transform(value.begin(), value.end(), value.begin(),
                    [](unsigned char ch) {
@@ -331,6 +379,7 @@ std::string lowercase(std::string value) {
     return value;
 }
 
+// Parses a finite numeric CSV/config value with a useful error message.
 double parseNumber(const std::string& text, const std::string& field,
                    const std::string& sensorId) {
     try {
@@ -346,6 +395,7 @@ double parseNumber(const std::string& text, const std::string& field,
     }
 }
 
+// Loads sensor IDs, coordinates, and optional display groups from CSV.
 std::vector<Sensor> loadSensors(std::istream& input, const std::string& source,
                                 Vec3 center, double scale,
                                 const Bounds& modelBounds) {
@@ -400,6 +450,7 @@ std::vector<Sensor> loadSensors(std::istream& input, const std::string& source,
         if (allEmpty) {
             continue;
         }
+        // Looks up one named CSV field and reports short rows clearly.
         const auto field = [&fields, &columns, rowNumber](const std::string& name)
             -> const std::string& {
             const std::size_t column = columns.at(name);
@@ -431,7 +482,13 @@ std::vector<Sensor> loadSensors(std::istream& input, const std::string& source,
 
         int group = -1;
         if (hasKernelColumn) {
-            group = static_cast<int>(parseNumber(field("kernel"), "kernel", id));
+            const double kernel = parseNumber(field("kernel"), "kernel", id);
+            if (std::trunc(kernel) != kernel || kernel < -1.0 || kernel > 34.0) {
+                throw std::runtime_error(
+                    "Invalid kernel for sensor " + id +
+                    ": expected an integer from -1 to 34.");
+            }
+            group = static_cast<int>(kernel);
         }
         sensors.push_back({id, point * scale, group});
     }
@@ -455,45 +512,64 @@ struct ViewPoint {
 
 class Viewer {
 public:
-    Viewer(Mesh mesh, SensorState& sensors)
-        : mesh_(std::move(mesh)), sensors_(sensors),
+    // Loads viewer settings and creates all SDL resources.
+    Viewer(Mesh mesh, SensorState& sensors, bool canEnabled)
+        : mesh_(std::move(mesh)), sensors_(sensors), canEnabled_(canEnabled),
           pixels_(static_cast<std::size_t>(kWidth) * kHeight),
           depthBuffer_(static_cast<std::size_t>(kWidth) * kHeight,
                        std::numeric_limits<double>::infinity()) {
-        groupVisible_.fill(true);
-        groupExpanded_.fill(true);
-        loadConfig();
-        window_ = SDL_CreateWindow(
-            "BGA Temperature Visualizer", SDL_WINDOWPOS_CENTERED,
-            SDL_WINDOWPOS_CENTERED, kWidth, kHeight,
-            SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
-        if (window_ == nullptr) {
-            throw std::runtime_error(std::string("SDL window error: ") + SDL_GetError());
-        }
+        try {
+            groupVisible_.fill(true);
+            groupExpanded_.fill(true);
+            loadConfig();
+            window_ = SDL_CreateWindow(
+                "BGA Temperature Visualizer", SDL_WINDOWPOS_CENTERED,
+                SDL_WINDOWPOS_CENTERED, kWidth, kHeight,
+                SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
+            if (window_ == nullptr) {
+                throw std::runtime_error(
+                    std::string("SDL window error: ") + SDL_GetError());
+            }
 
-        renderer_ = SDL_CreateRenderer(window_, -1, SDL_RENDERER_SOFTWARE);
-        if (renderer_ == nullptr) {
-            throw std::runtime_error(std::string("SDL renderer error: ") + SDL_GetError());
-        }
-        if (SDL_RenderSetLogicalSize(renderer_, kWidth, kHeight) != 0) {
-            throw std::runtime_error(std::string("SDL logical size error: ") + SDL_GetError());
-        }
+            renderer_ = SDL_CreateRenderer(window_, -1, SDL_RENDERER_SOFTWARE);
+            if (renderer_ == nullptr) {
+                throw std::runtime_error(
+                    std::string("SDL renderer error: ") + SDL_GetError());
+            }
+            if (SDL_RenderSetLogicalSize(renderer_, kWidth, kHeight) != 0) {
+                throw std::runtime_error(
+                    std::string("SDL logical size error: ") + SDL_GetError());
+            }
 
-        texture_ = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_ARGB8888,
-                                     SDL_TEXTUREACCESS_STREAMING, kWidth, kHeight);
-        if (texture_ == nullptr) {
-            throw std::runtime_error(std::string("SDL texture error: ") + SDL_GetError());
+            texture_ = SDL_CreateTexture(
+                renderer_, SDL_PIXELFORMAT_ARGB8888,
+                SDL_TEXTUREACCESS_STREAMING, kWidth, kHeight);
+            if (texture_ == nullptr) {
+                throw std::runtime_error(
+                    std::string("SDL texture error: ") + SDL_GetError());
+            }
+            if (SDL_SetTextureBlendMode(texture_, SDL_BLENDMODE_NONE) != 0) {
+                throw std::runtime_error(
+                    std::string("SDL texture blend error: ") + SDL_GetError());
+            }
+        } catch (...) {
+            releaseSdlResources();
+            SDL_Quit();
+            throw;
         }
-        SDL_SetTextureBlendMode(texture_, SDL_BLENDMODE_NONE);
     }
 
+    // Keeps SDL resource ownership unique to one Viewer instance.
+    Viewer(const Viewer&) = delete;
+    Viewer& operator=(const Viewer&) = delete;
+
+    // Releases SDL resources after normal shutdown.
     ~Viewer() {
-        if (texture_ != nullptr) SDL_DestroyTexture(texture_);
-        if (renderer_ != nullptr) SDL_DestroyRenderer(renderer_);
-        if (window_ != nullptr) SDL_DestroyWindow(window_);
+        releaseSdlResources();
         SDL_Quit();
     }
 
+    // Runs the SDL event and rendering loop until the user exits.
     int run() {
         bool running = true;
         while (running) {
@@ -514,6 +590,7 @@ private:
     SDL_Texture* texture_ = nullptr;
     Mesh mesh_;
     SensorState& sensors_;
+    bool canEnabled_ = false;
     std::vector<Pixel> pixels_;
     std::vector<double> depthBuffer_;
     double heading_ = 35.0;
@@ -533,10 +610,6 @@ private:
     std::array<bool, 35> groupVisible_{};
     std::array<bool, 35> groupExpanded_{};
     std::vector<SDL_Rect> groupCheckboxes_;
-    SDL_Rect collapseAllButton_{};
-    SDL_Rect bottomModelSlider_{};
-    SDL_Rect bottomZOffsetSlider_{};
-    SDL_Rect autoPerspButton_{};
 
     struct DisplayEntry {
         bool isGroup = false;
@@ -545,18 +618,37 @@ private:
     };
     std::vector<DisplayEntry> displayEntries_;
 
+    // Destroys partially or fully initialized SDL objects safely.
+    void releaseSdlResources() noexcept {
+        if (texture_ != nullptr) {
+            SDL_DestroyTexture(texture_);
+            texture_ = nullptr;
+        }
+        if (renderer_ != nullptr) {
+            SDL_DestroyRenderer(renderer_);
+            renderer_ = nullptr;
+        }
+        if (window_ != nullptr) {
+            SDL_DestroyWindow(window_);
+            window_ = nullptr;
+        }
+    }
+
+    // Toggles visibility of one valid kernel group.
     void toggleGroupVisibility(int group) {
         if (group >= 0 && group < 35) {
             groupVisible_[group] = !groupVisible_[group];
         }
     }
 
+    // Expands or collapses one valid kernel group.
     void toggleGroupExpanded(int group) {
         if (group >= 0 && group < 35) {
             groupExpanded_[group] = !groupExpanded_[group];
         }
     }
 
+    // Expands every group or collapses every group together.
     void toggleAllGroupsExpanded() {
         bool allExpanded = true;
         for (int g = 0; g < 35; ++g) {
@@ -570,13 +662,30 @@ private:
         }
     }
 
-    // Загрузка конфигурации из config.txt (из корня проекта).
+    // Loads persisted camera, display, and group settings.
     void loadConfig() {
         const fs::path configPath = getProjectRootDir() / "config.txt";
         std::ifstream file(configPath);
         if (!file) {
             return;  // Конфига нет — используем значения по умолчанию.
         }
+        // Loads a numeric setting only when it is finite and in range.
+        const auto loadNumber = [](const std::string& key,
+                                   const std::string& value, double minimum,
+                                   double maximum, double& destination) {
+            try {
+                const double parsed = parseNumber(value, key, "config");
+                if (parsed < minimum || parsed > maximum) {
+                    std::cerr << "Warning: Ignoring out-of-range config value for "
+                              << key << ".\n";
+                    return;
+                }
+                destination = parsed;
+            } catch (const std::exception& error) {
+                std::cerr << "Warning: Ignoring invalid config value for "
+                          << key << ": " << error.what() << '\n';
+            }
+        };
         std::string line;
         while (std::getline(file, line)) {
             // Пропускаем пустые строки и комментарии.
@@ -588,26 +697,26 @@ private:
             if (eqPos == std::string::npos) {
                 continue;
             }
-            const std::string key = trimmed.substr(0, eqPos);
-            const std::string value = trimmed.substr(eqPos + 1);
+            const std::string key = trim(trimmed.substr(0, eqPos));
+            const std::string value = trim(trimmed.substr(eqPos + 1));
 
             if (key == "auto-perspective-heading") {
-                autoPerspHeading_ = parseNumber(value, "auto-perspective-heading", "config");
+                loadNumber(key, value, -360.0, 360.0, autoPerspHeading_);
             } else if (key == "auto-perspective-pitch") {
-                autoPerspPitch_ = parseNumber(value, "auto-perspective-pitch", "config");
+                loadNumber(key, value, -85.0, 85.0, autoPerspPitch_);
             } else if (key == "auto-perspective-distance") {
-                autoPerspDistance_ = parseNumber(value, "auto-perspective-distance", "config");
+                loadNumber(key, value, 7.0, 60.0, autoPerspDistance_);
             } else if (key == "model-transparency") {
-                transparency_ = parseNumber(value, "model-transparency", "config");
+                loadNumber(key, value, 0.0, 0.95, transparency_);
             } else if (key == "model-z-offset") {
-                modelZOffset_ = parseNumber(value, "model-z-offset", "config");
+                loadNumber(key, value, -10.0, 10.0, modelZOffset_);
             } else if (key == "disabled-kernels") {
                 parseDisabledKernels(value);
             }
         }
     }
 
-    // Сохранение конфигурации в config.txt (в корень проекта) при закрытии программы.
+    // Saves the current settings to the project config file.
     void saveConfig() {
         const fs::path configPath = getProjectRootDir() / "config.txt";
         std::ofstream file(configPath);
@@ -617,9 +726,9 @@ private:
         file << "# Конфигурация приложения TermVisualization-BGA\n";
         file << "# Строки, начинающиеся с #, являются комментариями.\n\n";
         file << "# 1. Параметры запуска программы\n";
-        file << "# no-can=1  - отключить приём CAN-данных (по умолчанию на Windows)\n";
+        file << "# no-can=1  - отключить приём CAN-данных\n";
         file << "# forced-can=1 - принудительно включить приём CAN-данных\n";
-        file << "no-can=1\n\n";
+        file << "no-can=" << (canEnabled_ ? 0 : 1) << "\n\n";
         file << "# 2. Углы просмотра для кнопки \"AUTO PERSPECTIVE\" (в градусах)\n";
         file << "auto-perspective-heading=" << autoPerspHeading_ << "\n";
         file << "auto-perspective-pitch=" << autoPerspPitch_ << "\n";
@@ -643,8 +752,7 @@ private:
         file << "\n";
     }
 
-private:
-    // Парсит список выключенных kernel из строки "0,3,7,14" или пустой строки.
+    // Parses the comma-separated list of hidden groups.
     void parseDisabledKernels(const std::string& value) {
         std::string trimmed = trim(value);
         if (trimmed.empty()) {
@@ -674,6 +782,7 @@ private:
         }
     }
 
+    // Returns the seven-row bitmap for one supported character.
     static const std::array<std::uint8_t, 7>& glyph(char character) {
         static const std::unordered_map<char, std::array<std::uint8_t, 7>> font = {
             {' ', {0, 0, 0, 0, 0, 0, 0}},
@@ -725,6 +834,7 @@ private:
         return found == font.end() ? blank : found->second;
     }
 
+    // Blends foreground color over background using an 8-bit alpha value.
     static Pixel blend(Pixel background, Pixel foreground, int alpha) {
         const int inverse = 255 - alpha;
         const int red = (((background >> 16) & 0xFF) * inverse +
@@ -736,6 +846,7 @@ private:
         return rgb(red, green, blue);
     }
 
+    // Fills a clipped rectangle in the CPU pixel buffer.
     void fillRect(int x, int y, int width, int height, Pixel color) {
         const int left = std::clamp(x, 0, kWidth);
         const int top = std::clamp(y, 0, kHeight);
@@ -748,6 +859,7 @@ private:
         }
     }
 
+    // Draws a filled circle using clipped horizontal spans.
     void fillCircle(int centerX, int centerY, int radius, Pixel color) {
         for (int y = -radius; y <= radius; ++y) {
             const int remaining = radius * radius - y * y;
@@ -756,6 +868,7 @@ private:
         }
     }
 
+    // Draws text from the built-in bitmap font.
     void drawText(std::string text, int x, int y, Pixel color, int scale = 1) {
         for (char& character : text) {
             if (character >= 'a' && character <= 'z') {
@@ -777,6 +890,7 @@ private:
         }
     }
 
+    // Rotates and projects a model point into screen coordinates.
     ViewPoint transform(Vec3 point) const {
         const double heading = heading_ * 3.14159265358979323846 / 180.0;
         const double pitch = pitch_ * 3.14159265358979323846 / 180.0;
@@ -799,6 +913,7 @@ private:
         };
     }
 
+    // Rotates a direction vector without applying translation.
     Vec3 transformDirection(Vec3 direction) const {
         const double heading = heading_ * 3.14159265358979323846 / 180.0;
         const double pitch = pitch_ * 3.14159265358979323846 / 180.0;
@@ -813,11 +928,13 @@ private:
         });
     }
 
+    // Computes the signed edge function used for triangle rasterization.
     static double edge(double ax, double ay, double bx, double by,
                        double px, double py) {
         return (px - ax) * (by - ay) - (py - ay) * (bx - ax);
     }
 
+    // Rasterizes one projected triangle with optional depth testing.
     void rasterTriangle(const std::array<ViewPoint, 3>& points, Pixel color,
                         int alpha, bool useDepth) {
         if (points[0].depth <= kNearPlane || points[1].depth <= kNearPlane ||
@@ -868,6 +985,7 @@ private:
         }
     }
 
+    // Maps a temperature to the viewer's existing heat-map colors.
     Pixel temperatureColor(double temperature) const {
         const double amount = std::clamp((temperature - 20.0) / 60.0, 0.0, 1.0);
         if (amount < 0.5) {
@@ -880,6 +998,7 @@ private:
                    static_cast<int>(255 * (1.0 - fraction)), 0);
     }
 
+    // Projects and rasterizes the complete STL mesh.
     void drawModel() {
         std::fill(depthBuffer_.begin(), depthBuffer_.end(),
                   std::numeric_limits<double>::infinity());
@@ -911,6 +1030,7 @@ private:
 
         const bool opaque = transparency_ <= 0.001;
         if (!opaque) {
+            // Sorts back-to-front so translucent faces blend in draw order.
             std::sort(projected.begin(), projected.end(),
                       [](const ProjectedTriangle& a, const ProjectedTriangle& b) {
                           return a.averageDepth > b.averageDepth;
@@ -922,10 +1042,14 @@ private:
         }
     }
 
+    // Draws visible sensor markers from a thread-safe state snapshot.
     void drawSensors(const std::vector<Sensor>& sensors) {
         for (const Sensor& sensor : sensors) {
-            if (sensor.group >= 0 && !groupVisible_[sensor.group]) {
-                continue;
+            if (sensor.group >= 0) {
+                if (sensor.group >= static_cast<int>(groupVisible_.size()) ||
+                    !groupVisible_[static_cast<std::size_t>(sensor.group)]) {
+                    continue;
+                }
             }
             const ViewPoint point = transform(sensor.position);
             if (!std::isfinite(point.x) || !std::isfinite(point.y) ||
@@ -947,6 +1071,7 @@ private:
         }
     }
 
+    // Builds and draws the sensor list and its group headers.
     void drawPanel(const std::vector<Sensor>& sensors) {
         const Pixel panel = rgb(19, 25, 34);
         const Pixel border = rgb(54, 67, 84);
@@ -957,12 +1082,12 @@ private:
         drawText("BGA VIEWER", kPanelX + 20, 16, text, 2);
 
         // Collapse all kernels button at the top of the list.
-        collapseAllButton_ = {kPanelX + 20, 42, 170, 18};
+        const SDL_Rect collapseAllButton{kPanelX + 20, 42, 170, 18};
         const Pixel buttonColor = rgb(58, 72, 90);
-        fillRect(collapseAllButton_.x, collapseAllButton_.y,
-                 collapseAllButton_.w, collapseAllButton_.h, buttonColor);
-        drawText("COLLAPSE ALL KERNELS", collapseAllButton_.x + 6,
-                 collapseAllButton_.y + 4, text);
+        fillRect(collapseAllButton.x, collapseAllButton.y,
+                 collapseAllButton.w, collapseAllButton.h, buttonColor);
+        drawText("COLLAPSE ALL KERNELS", collapseAllButton.x + 6,
+                 collapseAllButton.y + 4, text);
 
         fillRect(kPanelX + 14, 66, kPanelWidth - 28, 1, border);
         drawText("ID", kPanelX + 20, 78, muted);
@@ -1025,7 +1150,10 @@ private:
                          rgb(27, 35, 47));
             }
             if (entry.isGroup) {
-                const char arrow = groupExpanded_[entry.groupId] ? '+' : '-';
+                const bool groupValid = entry.groupId >= 0 && entry.groupId < 35;
+                const char arrow = !groupValid || groupExpanded_[entry.groupId]
+                    ? '+'
+                    : '-';
                 drawText(std::string(1, arrow) + " Kernel " +
                              std::to_string(entry.groupId),
                          kPanelX + 20, y + 5, text);
@@ -1051,7 +1179,8 @@ private:
                  kPanelX + kPanelWidth - 110, kHeight - 8, muted);
     }
 
-    void drawBottomControls(const std::vector<Sensor>& /*sensors*/) {
+    // Draws kernel visibility controls and model adjustment sliders.
+    void drawBottomControls() {
         const Pixel panel = rgb(19, 25, 34);
         const Pixel border = rgb(54, 67, 84);
         const Pixel text = rgb(225, 232, 241);
@@ -1094,15 +1223,15 @@ private:
         drawText(std::to_string(modelPercent) + "%",
                  kBottomSliderX + kBottomSliderWidth + 10,
                  kModelTransparencyY, text);
-        bottomModelSlider_ = {kBottomSliderX, kModelTransparencyY + 14,
-                              kBottomSliderWidth, 12};
-        fillRect(bottomModelSlider_.x, bottomModelSlider_.y,
-                 bottomModelSlider_.w, bottomModelSlider_.h,
+        const SDL_Rect modelSlider{kBottomSliderX, kModelTransparencyY + 14,
+                                   kBottomSliderWidth, 12};
+        fillRect(modelSlider.x, modelSlider.y,
+                 modelSlider.w, modelSlider.h,
                  rgb(58, 72, 90));
         const int modelKnobX = kBottomSliderX +
             static_cast<int>(std::lround(
                 (transparency_ / 0.95) * kBottomSliderWidth));
-        fillCircle(modelKnobX, bottomModelSlider_.y + 6, 7,
+        fillCircle(modelKnobX, modelSlider.y + 6, 7,
                    rgb(91, 183, 240));
 
         // MODEL Z OFFSET slider.
@@ -1112,24 +1241,25 @@ private:
         drawText(std::to_string(zOffsetPercent) + "%",
                  kBottomSliderX + kBottomSliderWidth + 10,
                  kModelZOffsetY, text);
-        bottomZOffsetSlider_ = {kBottomSliderX, kModelZOffsetY + 14,
-                                kBottomSliderWidth, 12};
-        fillRect(bottomZOffsetSlider_.x, bottomZOffsetSlider_.y,
-                 bottomZOffsetSlider_.w, bottomZOffsetSlider_.h,
+        const SDL_Rect zOffsetSlider{kBottomSliderX, kModelZOffsetY + 14,
+                                     kBottomSliderWidth, 12};
+        fillRect(zOffsetSlider.x, zOffsetSlider.y,
+                 zOffsetSlider.w, zOffsetSlider.h,
                  rgb(58, 72, 90));
         const int zOffsetKnobX = kBottomSliderX +
             static_cast<int>(std::lround(
                 ((modelZOffset_ + 10.0) / 20.0) * kBottomSliderWidth));
-        fillCircle(zOffsetKnobX, bottomZOffsetSlider_.y + 6, 7,
+        fillCircle(zOffsetKnobX, zOffsetSlider.y + 6, 7,
                    rgb(91, 183, 240));
     }
 
+    // Renders one complete frame using SDL's streaming texture.
     void drawFrame() {
         std::fill(pixels_.begin(), pixels_.end(), rgb(25, 31, 41));
         const std::vector<Sensor> sensors = sensors_.snapshot();
         drawModel();
         drawSensors(sensors);
-        drawBottomControls(sensors);
+        drawBottomControls();
         drawPanel(sensors);
         drawAutoPerspButton();
         void* texturePixels = nullptr;
@@ -1147,46 +1277,58 @@ private:
                         rowBytes);
         }
         SDL_UnlockTexture(texture_);
-        SDL_RenderClear(renderer_);
-        SDL_RenderCopy(renderer_, texture_, nullptr, nullptr);
+        if (SDL_RenderClear(renderer_) != 0) {
+            throw std::runtime_error(std::string("SDL clear error: ") +
+                                     SDL_GetError());
+        }
+        if (SDL_RenderCopy(renderer_, texture_, nullptr, nullptr) != 0) {
+            throw std::runtime_error(std::string("SDL copy error: ") +
+                                     SDL_GetError());
+        }
         SDL_RenderPresent(renderer_);
     }
 
+    // Sets model transparency from the horizontal slider position.
     void setTransparency(int mouseX) {
         const double relative = static_cast<double>(mouseX - kBottomSliderX) /
                                 static_cast<double>(kBottomSliderWidth);
         transparency_ = std::clamp(relative * 0.95, 0.0, 0.95);
     }
 
+    // Sets model vertical offset from the horizontal slider position.
     void setModelZOffset(int mouseX) {
         const double relative = static_cast<double>(mouseX - kBottomSliderX) /
                                 static_cast<double>(kBottomSliderWidth);
         modelZOffset_ = std::clamp(relative * 20.0 - 10.0, -10.0, 10.0);
     }
 
+    // Applies the persisted auto-perspective camera values.
     void setAutoPerspective() {
         heading_ = autoPerspHeading_;
         pitch_ = autoPerspPitch_;
         distance_ = autoPerspDistance_;
     }
 
+    // Draws the auto-perspective button over the viewport.
     void drawAutoPerspButton() {
-        autoPerspButton_ = {kAutoPerspButtonX, kAutoPerspButtonY,
-                            kAutoPerspButtonW, kAutoPerspButtonH};
+        const SDL_Rect autoPerspButton{kAutoPerspButtonX, kAutoPerspButtonY,
+                                       kAutoPerspButtonW, kAutoPerspButtonH};
         const Pixel buttonColor = rgb(58, 72, 90);
-        fillRect(autoPerspButton_.x, autoPerspButton_.y,
-                 autoPerspButton_.w, autoPerspButton_.h, buttonColor);
-        fillRect(autoPerspButton_.x + 2, autoPerspButton_.y + 2,
-                 autoPerspButton_.w - 4, autoPerspButton_.h - 4,
+        fillRect(autoPerspButton.x, autoPerspButton.y,
+                 autoPerspButton.w, autoPerspButton.h, buttonColor);
+        fillRect(autoPerspButton.x + 2, autoPerspButton.y + 2,
+                 autoPerspButton.w - 4, autoPerspButton.h - 4,
                  rgb(19, 25, 34));
-        drawText("AUTO PERSPECTIVE", autoPerspButton_.x + 8,
-                 autoPerspButton_.y + 6, rgb(225, 232, 241));
+        drawText("AUTO PERSPECTIVE", autoPerspButton.x + 8,
+                 autoPerspButton.y + 6, rgb(225, 232, 241));
     }
 
+    // Changes camera distance while keeping the supported zoom range.
     void changeZoom(double factor) {
         distance_ = std::clamp(distance_ * factor, 7.0, 60.0);
     }
 
+    // Handles window, mouse, wheel, and keyboard events.
     bool handleEvent(const SDL_Event& event) {
         if (event.type == SDL_QUIT) {
             return false;
@@ -1297,14 +1439,29 @@ struct ProgramOptions {
     std::string modelPath;
     std::string sensorCsvPath;
     std::string canInterface = "can0";
+    CanByteOrder canByteOrder = CanByteOrder::LittleEndian;
 #ifdef _WIN32
     bool canEnabled = false;  // Windows: CAN выключен по умолчанию
 #else
     bool canEnabled = true;   // Linux: CAN включен по умолчанию
 #endif
     bool forcedCanRequested = false;
+    bool noCanRequested = false;
 };
 
+// Parses the byte-order values accepted by the CAN command-line option.
+CanByteOrder parseCanByteOrder(const std::string& value) {
+    const std::string normalized = lowercase(value);
+    if (normalized == "little" || normalized == "little-endian") {
+        return CanByteOrder::LittleEndian;
+    }
+    if (normalized == "big" || normalized == "big-endian") {
+        return CanByteOrder::BigEndian;
+    }
+    throw std::runtime_error("CAN byte order must be 'little' or 'big'.");
+}
+
+// Converts command-line arguments into validated application options.
 ProgramOptions parseArguments(int argc, char* argv[]) {
     ProgramOptions options;
     for (int index = 1; index < argc; ++index) {
@@ -1314,6 +1471,7 @@ ProgramOptions parseArguments(int argc, char* argv[]) {
             options.forcedCanRequested = true;
         } else if (argument == "--no-can") {
             options.canEnabled = false;
+            options.noCanRequested = true;
         } else if (argument == "--can-interface") {
             if (index + 1 >= argc) {
                 throw std::runtime_error("--can-interface requires an interface name.");
@@ -1321,6 +1479,15 @@ ProgramOptions parseArguments(int argc, char* argv[]) {
             options.canInterface = argv[++index];
         } else if (argument.rfind("--can-interface=", 0) == 0) {
             options.canInterface = argument.substr(std::string("--can-interface=").size());
+        } else if (argument == "--can-byte-order") {
+            if (index + 1 >= argc) {
+                throw std::runtime_error(
+                    "--can-byte-order requires 'little' or 'big'.");
+            }
+            options.canByteOrder = parseCanByteOrder(argv[++index]);
+        } else if (argument.rfind("--can-byte-order=", 0) == 0) {
+            options.canByteOrder = parseCanByteOrder(
+                argument.substr(std::string("--can-byte-order=").size()));
         } else if (argument.rfind("--", 0) == 0) {
             throw std::runtime_error("Unknown option: " + argument);
         } else if (options.modelPath.empty()) {
@@ -1339,14 +1506,14 @@ ProgramOptions parseArguments(int argc, char* argv[]) {
 
 }  // namespace
 
-// Читает флаг forced-can из config.txt (корень проекта).
-// Возвращает true, если в файле есть forced-can=1.
-bool readForcedCanFromConfig() {
+// Reads the configured CAN state; forced-can=1 overrides no-can in the file.
+std::optional<bool> readCanEnabledFromConfig() {
     const fs::path configPath = getProjectRootDir() / "config.txt";
     std::ifstream file(configPath);
     if (!file) {
-        return false;
+        return std::nullopt;
     }
+    std::optional<bool> canEnabled;
     std::string line;
     while (std::getline(file, line)) {
         const auto trimmed = trim(line);
@@ -1357,15 +1524,19 @@ bool readForcedCanFromConfig() {
         if (eqPos == std::string::npos) {
             continue;
         }
-        const std::string key = trimmed.substr(0, eqPos);
-        const std::string value = trimmed.substr(eqPos + 1);
+        const std::string key = trim(trimmed.substr(0, eqPos));
+        const std::string value = trim(trimmed.substr(eqPos + 1));
         if (key == "forced-can" && value == "1") {
             return true;
         }
+        if (key == "no-can" && (value == "0" || value == "1")) {
+            canEnabled = value == "0";
+        }
     }
-    return false;
+    return canEnabled;
 }
 
+// Initializes SDL, loads project data, starts CAN, and runs the viewer.
 int main(int argc, char* argv[]) {
     ProgramOptions options;
     try {
@@ -1373,23 +1544,28 @@ int main(int argc, char* argv[]) {
     } catch (const std::exception& error) {
         std::cerr << "Error: " << error.what() << '\n'
                   << "Usage: bga_visualizer [model.stl] [sensors.csv] "
-                     "[--can-interface NAME] [--no-can] [--forced-can]\n";
+                     "[--can-interface NAME] [--can-byte-order little|big] "
+                     "[--no-can] [--forced-can]\n";
         return 2;
     }
 
-    // На Windows CAN выключен по умолчанию. Включаем, если запрошено
-    // через --forced-can или forced-can=1 в config.txt.
-    if (options.forcedCanRequested || readForcedCanFromConfig()) {
-        options.canEnabled = true;
-    }
-
     SDL_SetMainReady();
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) != 0) {
+    if (SDL_Init(SDL_INIT_VIDEO) != 0) {
         std::cerr << "SDL initialization error: " << SDL_GetError() << '\n';
+        SDL_Quit();
         return 1;
     }
 
     try {
+        // Explicit CLI flags take priority over CAN settings from the config.
+        if (options.noCanRequested) {
+            options.canEnabled = false;
+        } else if (options.forcedCanRequested) {
+            options.canEnabled = true;
+        } else if (const auto configuredCan = readCanEnabledFromConfig()) {
+            options.canEnabled = *configuredCan;
+        }
+
         Mesh mesh;
         if (!options.modelPath.empty()) {
             mesh = loadStl(options.modelPath);
@@ -1427,15 +1603,8 @@ int main(int argc, char* argv[]) {
         CanReceiver canReceiver;
         if (options.canEnabled) {
             std::string canError;
-            std::vector<std::string> sensorIds;
-            for (const Sensor& sensor : sensorState.snapshot()) {
-                sensorIds.push_back(sensor.id);
-            }
-            std::vector<CanFilterId> canFilters;
-            const bool filtersBuilt =
-                buildCanFiltersForSensors(sensorIds, canFilters, canError);
-            const bool receiverStarted = filtersBuilt && canReceiver.start(
-                options.canInterface, canFilters,
+            const bool receiverStarted = canReceiver.start(
+                options.canInterface, options.canByteOrder,
                 [&sensorState](const SensorReading& reading) {
                     sensorState.updateTemperature(reading.sensorId,
                                                   reading.temperatureC);
@@ -1452,7 +1621,7 @@ int main(int argc, char* argv[]) {
             std::cout << "CAN reception disabled.\n";
         }
 
-        Viewer viewer(std::move(mesh), sensorState);
+        Viewer viewer(std::move(mesh), sensorState, options.canEnabled);
         return viewer.run();
     } catch (const std::exception& error) {
         std::cerr << "Error: " << error.what() << '\n';

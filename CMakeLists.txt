@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.16)
 
 project(TermVisualizationBGA VERSION 0.1.0 LANGUAGES CXX)
 
+include(CTest)
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -73,5 +75,21 @@ if(MSVC)
     target_compile_options(bga_visualizer PRIVATE /W4 /permissive-)
 else()
     target_compile_options(bga_visualizer PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+if(BUILD_TESTING)
+    add_executable(can_protocol_tests
+        tests/can_protocol_tests.cpp
+        src/can_protocol.cpp
+        src/sensor_state.cpp
+    )
+    target_include_directories(can_protocol_tests PRIVATE "${PROJECT_SOURCE_DIR}/src")
+    target_link_libraries(can_protocol_tests PRIVATE Threads::Threads)
+    if(MSVC)
+        target_compile_options(can_protocol_tests PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(can_protocol_tests PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+    add_test(NAME can_protocol_tests COMMAND can_protocol_tests)
 endif()
 

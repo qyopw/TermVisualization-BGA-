@@ -14,6 +14,8 @@ brew install cmake sdl2
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ./build/bga_visualizer --no-can
+# For sensors that transmit temperature bytes most-significant first:
+./build/bga_visualizer --can-byte-order big
 ```
 
 ## Разработка на Windows (Visual Studio Code)
@@ -74,7 +76,7 @@ Copy-Item "$env:USERPROFILE\vcpkg\installed\x64-windows\bin\SDL2.dll" ".\build\R
 ### Параметры командной строки
 
 ```
-bga_visualizer.exe [model.stl] [sensors.csv] [--can-interface NAME] [--no-can]
+bga_visualizer.exe [model.stl] [sensors.csv] [--can-interface NAME] [--can-byte-order little|big] [--no-can] [--forced-can]
 ```
 
 Без аргументов используются встроенные в исполняемый файл модель и список датчиков.

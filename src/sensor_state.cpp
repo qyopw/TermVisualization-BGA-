@@ -4,6 +4,7 @@
 #include <stdexcept>
 #include <utility>
 
+// Validates sensor metadata and builds the direct sensor ID lookup.
 SensorState::SensorState(std::vector<Sensor> sensors)
     : sensors_(std::move(sensors)) {
     sensorIndexById_.reserve(sensors_.size());
@@ -11,8 +12,9 @@ SensorState::SensorState(std::vector<Sensor> sensors)
         if (sensors_[index].id.empty()) {
             throw std::invalid_argument("Sensor IDs cannot be empty.");
         }
-        if (sensors_[index].group < -1) {
-            throw std::invalid_argument("Sensor group cannot be less than -1.");
+        if (sensors_[index].group < -1 || sensors_[index].group > 34) {
+            throw std::invalid_argument(
+                "Sensor group must be -1 or an integer from 0 to 34.");
         }
         if (!sensorIndexById_.emplace(sensors_[index].id, index).second) {
             throw std::invalid_argument("Duplicate sensor ID: " + sensors_[index].id);
@@ -20,6 +22,7 @@ SensorState::SensorState(std::vector<Sensor> sensors)
     }
 }
 
+// Updates one known sensor while protecting shared state with the mutex.
 bool SensorState::updateTemperature(
     const std::string& sensorId, double temperature,
     std::chrono::steady_clock::time_point updatedAt) {
@@ -40,11 +43,8 @@ bool SensorState::updateTemperature(
     return true;
 }
 
+// Copies the current sensor values for a consistent render pass.
 std::vector<Sensor> SensorState::snapshot() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return sensors_;
-}
-
-std::size_t SensorState::size() const noexcept {
-    return sensors_.size();
 }

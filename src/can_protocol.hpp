@@ -5,16 +5,24 @@
 #include <string>
 #include <vector>
 
+constexpr std::uint32_t kTemperatureCanId = 0x3C0;
+constexpr std::uint8_t kMaximumSensorId = 107;
+constexpr double kTemperatureScaleC = 0.001;
+
+// Selects how the two temperature bytes are assembled into one raw value.
+enum class CanByteOrder {
+    LittleEndian,
+    BigEndian,
+};
+
 struct CanFrame {
     std::uint32_t id = 0;
     std::uint8_t length = 0;
     bool isExtended = false;
+    bool isRemote = false;
+    bool isError = false;
+    bool isFd = false;
     std::array<std::uint8_t, 8> data{};
-};
-
-struct CanFilterId {
-    std::uint32_t id = 0;
-    bool isExtended = false;
 };
 
 struct SensorReading {
@@ -22,11 +30,11 @@ struct SensorReading {
     double temperatureC = 0.0;
 };
 
-// A frame ID selects a group of eight sensors; each data byte is one
-// unsigned whole-degree Celsius reading. Extended IDs also accept the
-// packed-decimal ID spelling used in the PCAN-View XMT file.
-bool buildCanFiltersForSensors(const std::vector<std::string>& sensorIds,
-                               std::vector<CanFilterId>& filters,
-                               std::string& error);
+// Decodes one SIGN-MAGNITUDE temperature using the selected byte order.
+double decodeTemperature(std::uint8_t firstByte, std::uint8_t secondByte,
+                         CanByteOrder byteOrder = CanByteOrder::LittleEndian) noexcept;
+
+// Validates a protocol frame and returns its zero, one, or two sensor readings.
 bool decodeCanFrame(const CanFrame& frame,
-                    std::vector<SensorReading>& readings);
+                    std::vector<SensorReading>& readings,
+                    CanByteOrder byteOrder = CanByteOrder::LittleEndian);
